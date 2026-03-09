@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
-    "music-metadata": "^9.1.0",
+    "music-metadata": "^7.14.0",
     "node-id3": "^0.2.6",
     "glob": "^10.3.10",
     "chokidar": "^3.6.0",
