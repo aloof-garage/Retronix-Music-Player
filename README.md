@@ -1,94 +1,81 @@
 # Retronix MK·II — Desktop Music Player
 
-A skeuomorphic Hi-Fi desktop music player built with Electron 29, React 18, and the Web Audio API.
+Skeuomorphic Hi-Fi desktop music player built with Electron 29, React 18, and the Web Audio API.
 
 ---
 
 ## Prerequisites
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| Node.js | 18–22 | **Node 24 works too** |
-| npm | 9+ | bundled with Node |
+| Tool | Version |
+|------|---------|
+| Node.js | 18 – 22 (any LTS) |
+| npm | bundled with Node |
 
-> **No C++ compiler or Visual Studio required.** All SQLite access uses `node-sqlite3-wasm` (pure WebAssembly).
+> **No C++ build tools, no native modules.** All data storage uses `electron-store` (pure JSON). No SQLite, no WASM.
 
 ---
 
-## Quick Start
+## Setup
 
 ```bash
-# 1. Clone / extract the project
+# 1. Enter the project folder
 cd retronix-music-player
 
-# 2. Install dependencies (no native compilation needed)
+# 2. Install dependencies  (~30 seconds, pure JS packages)
 npm install
 
-# 3. Start in development mode
+# 3. Launch in development mode
 npm run dev
 ```
 
-The app window will open automatically. Dev Tools open in a detached window.
+The window opens automatically. DevTools launch in a detached pane.
 
 ---
 
 ## Adding Music
 
-Three ways to add songs:
+### Option A — Add a folder (scans automatically)
+Click **+ ADD FOLDER** (visible on the empty library screen, or in **Settings → Music Library**).  
+The folder is registered and a scan starts immediately — progress shows in the sidebar.
 
-### A — Add a folder (recommended)
-1. Go to **Settings** (gear icon, top-right) → **Music Library**
-2. Click **+ ADD FOLDER** and pick your music directory
-3. The library scans automatically — progress shows in the sidebar
+### Option B — Import individual files
+Click **⇩ IMPORT FILES** on the empty library screen or in Settings.  
+Pick one or more `.mp3 / .flac / .wav / .aac / .ogg / .m4a` files.
 
-Or click **+ ADD FOLDER** on the empty library screen.
-
-### B — Import individual files
-1. Click **⇩ IMPORT FILES** (Settings or empty library screen)
-2. Select one or more `.mp3 / .flac / .wav / .aac / .ogg / .m4a` files
-3. They appear in the library immediately
-
-### C — Drag & drop / file association
-- Pass a file path on the command line: `retronix-music-player song.mp3`
-- Double-click an associated audio file (after building the installer)
+### Option C — Drag audio files onto the window
+Drop audio files directly onto the app window to import and play them.
 
 ---
 
 ## Playing Music
 
-- **Double-click** any track in the library to play it
-- The full album/playlist becomes the queue automatically
-- **Prev / Play / Pause / Next** buttons in the bottom bar
+- **Double-click** any track to play it (the rest of the list becomes the queue)
+- **⏮ / ▶⏸ / ⏭** transport buttons in the bottom bar
 - **Drag** the progress slider to seek
-- **Drag** the Volume knob up/down to change volume
-- **Bass / Mid / Treble** mini-knobs provide quick EQ
+- **Drag** the Volume knob (up = louder, down = quieter)
 
 ---
 
-## Playlists
+## Equalizer
 
-1. Navigate to **Playlists** in the sidebar
-2. Click **+ NEW** to create a playlist
-3. Right-click tracks in the library (or use the menu) to add them
-4. **⇩ IMPORT** imports an `.m3u` / `.m3u8` file
-5. **⇑ EXPORT** saves the selected playlist as `.m3u8`
+Navigate to **Equalizer** in the sidebar.
+
+- **Drag each band slider up/down** (−12 dB to +12 dB)
+- Choose a **preset** (FLAT, BASS+, ROCK, POP, JAZZ, etc.)
+- The **EQ ON** toggle bypasses the EQ without losing your settings
+- The mini **Bass / Mid / Treble** knobs in the bottom bar give quick access
 
 ---
 
 ## Building a Distributable
 
 ```bash
-# Windows installer + portable exe
-npm run package:win
-
-# macOS dmg + zip
-npm run package:mac
-
-# Linux AppImage + deb
-npm run package:linux
+npm run package:win    # Windows — NSIS installer + portable exe
+npm run package:mac    # macOS   — DMG + ZIP
+npm run package:linux  # Linux   — AppImage + DEB
 ```
 
-Outputs land in the `dist/` folder.
+Output goes to the `dist/` folder.
 
 ---
 
@@ -96,39 +83,44 @@ Outputs land in the `dist/` folder.
 
 ```
 src/
-├── main/                   Electron main process
-│   ├── index.js            App bootstrap, protocol registration, window
-│   ├── ipcHandlers.js      All IPC channel handlers
-│   ├── libraryScanner.js   Recursive file scanner + metadata extraction
+├── main/
+│   ├── index.js            Bootstrap, protocol registration, window
+│   ├── ipcHandlers.js      All IPC channel handlers (library, audio, playlists…)
+│   ├── libraryScanner.js   Recursive file glob + music-metadata extraction
 │   ├── mediaKeys.js        Global media key shortcuts
 │   ├── trayManager.js      System tray icon + menu
 │   └── database/
-│       └── db.js           SQLite via node-sqlite3-wasm
+│       └── db.js           electron-store JSON library (zero native deps)
 ├── preload/
-│   └── index.js            contextBridge — exposes window.electronAPI
+│   └── index.js            contextBridge → window.electronAPI
 └── renderer/src/
-    ├── App.jsx             Root component + settings persistence
+    ├── App.jsx
     ├── engine/
-    │   ├── AudioEngine.js  Web Audio API engine (EQ, analyser, seek)
+    │   ├── AudioEngine.js  Web Audio API (10-band EQ, analyser, seek)
     │   └── Visualizer.js   Canvas visualizer (5 modes)
     ├── store/
-    │   ├── PlayerStore.jsx React context — playback state + actions
-    │   └── LibraryStore.jsx React context — library + playlists
-    └── components/         UI components (all inline styles, no CSS files)
+    │   ├── PlayerStore.jsx Playback state + actions
+    │   └── LibraryStore.jsx Library + playlists
+    └── components/         All UI (inline styles, no CSS files)
 ```
+
+### Data Storage
+
+All library data (tracks, playlists, play history, paths) is stored as JSON in:
+- **Windows**: `%APPDATA%\retronix-music-player\library.json`
+- **macOS**:   `~/Library/Application Support/retronix-music-player/library.json`
+- **Linux**:   `~/.config/retronix-music-player/library.json`
 
 ### Audio Loading
 
-Files are read in the **main process** via `fs.readFileSync` and transferred to the renderer as base64 over IPC. The renderer decodes `base64 → ArrayBuffer → AudioBuffer` using the Web Audio API. This approach:
+Files are read by the **main process** (`fs.readFileSync`) and sent to the renderer as base64 over IPC.  
+The renderer decodes `base64 → ArrayBuffer → AudioBuffer` using the Web Audio API.  
+This bypasses all CSP restrictions and works with any local path.
 
-- Bypasses all CSP restrictions
-- Works with any local path (including Windows `C:\...`)
-- Requires no special protocol configuration
-
-### Signal Chain
+### Audio Signal Chain
 
 ```
-BufferSourceNode → EQ[10×BiquadFilter] → GainNode → MasterGain → AnalyserNode → AudioDestination
+BufferSource → EQ[10 × BiquadFilter] → GainNode → MasterGain → Analyser → AudioDestination
 ```
 
 ---
@@ -143,9 +135,9 @@ BufferSourceNode → EQ[10×BiquadFilter] → GainNode → MasterGain → Analys
 
 | Problem | Fix |
 |---------|-----|
-| `npm install` fails | Make sure you are using Node 18–24. Run `node -v` to check. |
-| Library stays empty after scan | Check the console (DevTools) for `[Scanner]` log lines. Verify the folder path exists and contains supported audio files. |
-| `electron-vite` not found | Run `npm install` again; it installs to `node_modules/.bin/`. Use `npx electron-vite dev` if the PATH is not set. |
-| Audio won't play | Open DevTools console and look for `[AudioEngine]` errors. Confirm the file exists at the path shown in the error. |
-| Window doesn't appear | The app uses a frameless window — look in the taskbar/dock. |
+| `npm install` fails | Check Node version: `node -v` must be 18–22 |
+| Library stays empty after scan | Open DevTools (auto-opens in dev mode) → Console tab → look for `[Scanner]` logs |
+| EQ sliders don't respond | Click the **EQ ON** toggle to make sure it's on. Drag sliders up/down, not left/right. |
+| Audio won't play | DevTools console → look for `[AudioEngine]` errors. Confirm the file path exists. |
+| Window not visible | App uses a frameless window — check the taskbar/dock. |
 

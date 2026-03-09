@@ -9,14 +9,15 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron .",
-    "package": "electron-builder",
-    "package:win": "electron-builder --win"
+    "package:win": "electron-builder --win",
+    "package:mac": "electron-builder --mac",
+    "package:linux": "electron-builder --linux"
   },
   "dependencies": {
+    "electron-store": "^8.1.0",
     "music-metadata": "^7.14.0",
     "glob": "^10.3.10",
-    "chokidar": "^3.6.0",
-    "electron-store": "^8.1.0"
+    "chokidar": "^3.6.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
@@ -32,18 +33,17 @@
     "productName": "Retronix Music Player",
     "directories": { "buildResources": "resources", "output": "dist" },
     "files": ["out/**/*"],
-    "win": { "target": ["nsis", "portable"] },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    },
+    "win":   { "target": ["nsis", "portable"] },
+    "mac":   { "target": ["dmg", "zip"] },
+    "linux": { "target": ["AppImage", "deb"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
     "fileAssociations": [
-      { "ext": "mp3", "name": "MP3 Audio", "role": "Viewer" },
+      { "ext": "mp3",  "name": "MP3 Audio",  "role": "Viewer" },
       { "ext": "flac", "name": "FLAC Audio", "role": "Viewer" },
-      { "ext": "wav", "name": "WAV Audio", "role": "Viewer" },
-      { "ext": "m4a", "name": "M4A Audio", "role": "Viewer" },
-      { "ext": "aac", "name": "AAC Audio", "role": "Viewer" },
-      { "ext": "ogg", "name": "OGG Audio", "role": "Viewer" }
+      { "ext": "wav",  "name": "WAV Audio",  "role": "Viewer" },
+      { "ext": "m4a",  "name": "M4A Audio",  "role": "Viewer" },
+      { "ext": "aac",  "name": "AAC Audio",  "role": "Viewer" },
+      { "ext": "ogg",  "name": "OGG Audio",  "role": "Viewer" }
     ]
   }
 }

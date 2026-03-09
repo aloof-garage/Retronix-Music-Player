@@ -1,334 +1,315 @@
 'use strict'
 
-const path = require('path')
-const { app } = require('electron')
-const fs = require('fs')
+/**
+ * Retronix Library Database
+ *
+ * Uses electron-store (pure JSON, zero native deps, zero WASM) instead of
+ * SQLite. All reads are in-memory (fast). Writes flush to disk atomically.
+ *
+ * Data layout on disk  (userData/library.json):
+ *   { tracks: [], playlists: [], playlistTracks: [], playHistory: [],
+ *     libraryPaths: [], artworkCache: {}, nextIds: { track, playlist, pt, history } }
+ */
 
-let db = null
+const Store = require('electron-store')
+const path  = require('path')
 
-function getDbPath() {
-  return path.join(app.getPath('userData'), 'library.db')
+let store = null
+
+// In-memory cache — loaded once on init, kept in sync on every write
+let _db = {
+  tracks:        [],
+  playlists:     [],
+  playlistTracks:[],
+  playHistory:   [],
+  libraryPaths:  [],
+  artworkCache:  {},          // hash → filePath
+  nextIds: { track: 1, playlist: 1, pt: 1, history: 1 },
 }
 
 function initDatabase() {
-  const dbPath = getDbPath()
-  const dbDir = path.dirname(dbPath)
-  if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true })
-  console.log('[DB] Opening at:', dbPath)
-
-  const { Database } = require('node-sqlite3-wasm')
-  db = new Database(dbPath)
-
-  db.exec('PRAGMA journal_mode = WAL')
-  db.exec('PRAGMA synchronous = NORMAL')
-  db.exec('PRAGMA cache_size = 10000')
-  db.exec('PRAGMA temp_store = MEMORY')
-  db.exec('PRAGMA foreign_keys = ON')
-
-  runMigrations()
-  console.log('[DB] Ready')
-  return db
-}
-
-function runMigrations() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS tracks (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      file_path      TEXT UNIQUE NOT NULL,
-      title          TEXT NOT NULL DEFAULT 'Unknown Title',
-      artist         TEXT NOT NULL DEFAULT 'Unknown Artist',
-      album          TEXT NOT NULL DEFAULT 'Unknown Album',
-      album_artist   TEXT,
-      genre          TEXT,
-      year           INTEGER,
-      track_number   INTEGER,
-      disc_number    INTEGER,
-      duration       REAL NOT NULL DEFAULT 0,
-      bitrate        INTEGER,
-      sample_rate    INTEGER,
-      channels       INTEGER,
-      codec          TEXT,
-      file_size      INTEGER,
-      last_modified  INTEGER,
-      date_added     INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-      plays          INTEGER NOT NULL DEFAULT 0,
-      last_played    INTEGER,
-      favorite       INTEGER NOT NULL DEFAULT 0,
-      rating         INTEGER DEFAULT 0,
-      comment        TEXT,
-      bpm            REAL,
-      artwork_path   TEXT,
-      artwork_hash   TEXT,
-      color          TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS playlists (
-      id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      name         TEXT NOT NULL,
-      description  TEXT,
-      created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-      updated_at   INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-      color        TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS playlist_tracks (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
-      track_id    INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-      position    INTEGER NOT NULL DEFAULT 0,
-      added_at    INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-      UNIQUE(playlist_id, track_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS play_history (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      track_id   INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-      played_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS library_paths (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      path      TEXT UNIQUE NOT NULL,
-      enabled   INTEGER NOT NULL DEFAULT 1,
-      added_at  INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-      last_scan INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS artwork_cache (
-      hash       TEXT PRIMARY KEY,
-      file_path  TEXT NOT NULL,
-      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_tracks_artist   ON tracks(artist);
-    CREATE INDEX IF NOT EXISTS idx_tracks_album    ON tracks(album);
-    CREATE INDEX IF NOT EXISTS idx_tracks_title    ON tracks(title);
-    CREATE INDEX IF NOT EXISTS idx_tracks_favorite ON tracks(favorite);
-    CREATE INDEX IF NOT EXISTS idx_tracks_filepath ON tracks(file_path);
-    CREATE INDEX IF NOT EXISTS idx_pt_playlist     ON playlist_tracks(playlist_id);
-    CREATE INDEX IF NOT EXISTS idx_history_track   ON play_history(track_id);
-  `)
-}
-
-// ── Low-level helpers ─────────────────────────────────────────────────────────
-// node-sqlite3-wasm is a drop-in for better-sqlite3 but parameters must be
-// passed as an array to stmt.run/get/all, not spread.
-
-function run(sql, params = []) {
-  const stmt = db.prepare(sql)
-  const result = stmt.run(params)
-  stmt.finalize()
-  // lastInsertRowid may be BigInt — coerce to Number for safe JSON serialisation
-  return { ...result, lastInsertRowid: Number(result.lastInsertRowid) }
-}
-
-function get(sql, params = []) {
-  const stmt = db.prepare(sql)
-  const row = stmt.get(params)
-  stmt.finalize()
-  return row || null
-}
-
-function all(sql, params = []) {
-  const stmt = db.prepare(sql)
-  const rows = stmt.all(params)
-  stmt.finalize()
-  return rows
-}
-
-// ── Query API ─────────────────────────────────────────────────────────────────
-const queries = {
-  getAllTracks: () => all('SELECT * FROM tracks ORDER BY artist ASC, album ASC, track_number ASC, title ASC'),
-
-  getTrackById: (id) => get('SELECT * FROM tracks WHERE id = ?', [Number(id)]),
-
-  getTrackByPath: (filePath) => get('SELECT * FROM tracks WHERE file_path = ?', [filePath]),
-
-  searchTracks: (query, limit = 500) => {
-    const q = `%${query}%`
-    return all(
-      'SELECT * FROM tracks WHERE title LIKE ? OR artist LIKE ? OR album LIKE ? OR genre LIKE ? ORDER BY title ASC LIMIT ?',
-      [q, q, q, q, limit]
-    )
-  },
-
-  getTracksByArtist: (artist) => all(
-    'SELECT * FROM tracks WHERE artist = ? ORDER BY album ASC, track_number ASC, title ASC',
-    [artist]
-  ),
-
-  getTracksByAlbum: (album, artist) => all(
-    'SELECT * FROM tracks WHERE album = ? AND artist = ? ORDER BY disc_number ASC, track_number ASC, title ASC',
-    [album, artist]
-  ),
-
-  getFavoriteTracks: () => all('SELECT * FROM tracks WHERE favorite = 1 ORDER BY title ASC'),
-
-  getRecentlyPlayed: (limit = 50) => all(`
-    SELECT DISTINCT t.* FROM tracks t
-    INNER JOIN play_history ph ON t.id = ph.track_id
-    ORDER BY ph.played_at DESC LIMIT ?
-  `, [limit]),
-
-  getMostPlayed: (limit = 50) => all(
-    'SELECT * FROM tracks ORDER BY plays DESC, title ASC LIMIT ?', [limit]
-  ),
-
-  upsertTrack: (track) => {
-    const existing = get('SELECT id FROM tracks WHERE file_path = ?', [track.file_path])
-    if (existing) {
-      run(`UPDATE tracks SET
-        title=?, artist=?, album=?, album_artist=?, genre=?, year=?,
-        track_number=?, disc_number=?, duration=?, bitrate=?, sample_rate=?,
-        channels=?, codec=?, file_size=?, last_modified=?, artwork_path=?,
-        artwork_hash=?, color=?, bpm=?, comment=?
-        WHERE file_path=?`,
-        [
-          track.title, track.artist, track.album, track.album_artist, track.genre,
-          track.year, track.track_number, track.disc_number, track.duration,
-          track.bitrate, track.sample_rate, track.channels, track.codec,
-          track.file_size, track.last_modified, track.artwork_path,
-          track.artwork_hash, track.color, track.bpm, track.comment,
-          track.file_path
-        ]
-      )
-      return { id: Number(existing.id), updated: true }
-    } else {
-      const r = run(`INSERT INTO tracks (
-        file_path, title, artist, album, album_artist, genre, year,
-        track_number, disc_number, duration, bitrate, sample_rate,
-        channels, codec, file_size, last_modified, artwork_path,
-        artwork_hash, color, bpm, comment
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [
-          track.file_path, track.title, track.artist, track.album, track.album_artist,
-          track.genre, track.year, track.track_number, track.disc_number,
-          track.duration, track.bitrate, track.sample_rate, track.channels,
-          track.codec, track.file_size, track.last_modified, track.artwork_path,
-          track.artwork_hash, track.color, track.bpm, track.comment
-        ]
-      )
-      return { id: Number(r.lastInsertRowid), updated: false }
+  store = new Store({
+    name: 'library',
+    defaults: {
+      tracks:        [],
+      playlists:     [],
+      playlistTracks:[],
+      playHistory:   [],
+      libraryPaths:  [],
+      artworkCache:  {},
+      nextIds: { track: 1, playlist: 1, pt: 1, history: 1 },
     }
-  },
+  })
 
-  updateTrackPlays: (id) => {
-    run('UPDATE tracks SET plays = plays + 1, last_played = ? WHERE id = ?', [Date.now(), Number(id)])
-    run('INSERT INTO play_history (track_id, played_at) VALUES (?, ?)', [Number(id), Date.now()])
-  },
+  // Load everything into memory
+  _db.tracks         = store.get('tracks',         [])
+  _db.playlists      = store.get('playlists',      [])
+  _db.playlistTracks = store.get('playlistTracks', [])
+  _db.playHistory    = store.get('playHistory',    [])
+  _db.libraryPaths   = store.get('libraryPaths',   [])
+  _db.artworkCache   = store.get('artworkCache',   {})
+  _db.nextIds        = store.get('nextIds',        { track: 1, playlist: 1, pt: 1, history: 1 })
 
-  toggleFavorite: (id) => {
-    run('UPDATE tracks SET favorite = CASE WHEN favorite = 1 THEN 0 ELSE 1 END WHERE id = ?', [Number(id)])
-    return get('SELECT favorite FROM tracks WHERE id = ?', [Number(id)])
-  },
+  console.log(`[DB] Loaded: ${_db.tracks.length} tracks, ${_db.playlists.length} playlists`)
+  return store
+}
 
-  removeTrack: (filePath) => run('DELETE FROM tracks WHERE file_path = ?', [filePath]),
+// ── Persist helpers ───────────────────────────────────────────────────────────
+function _flush(key) { store.set(key, _db[key]) }
+function _nextId(kind) { const id = _db.nextIds[kind]; _db.nextIds[kind]++; store.set('nextIds', _db.nextIds); return id }
 
-  getAllAlbums: () => all(`
-    SELECT album as title, artist, album_artist,
-           MIN(year) as year, COUNT(*) as track_count,
-           SUM(duration) as total_duration,
-           MAX(artwork_path) as artwork_path, MAX(color) as color
-    FROM tracks
-    GROUP BY album, artist
-    ORDER BY artist ASC, year ASC
-  `),
+// ── Public query API ──────────────────────────────────────────────────────────
+const queries = {
 
-  getAllArtists: () => all(`
-    SELECT artist as name,
-           COUNT(DISTINCT album) as album_count,
-           COUNT(*) as track_count,
-           SUM(duration) as total_duration
-    FROM tracks
-    GROUP BY artist
-    ORDER BY artist ASC
-  `),
-
-  // ── Playlists ──────────────────────────────────────────────────────────────
-  getAllPlaylists: () => all('SELECT * FROM playlists ORDER BY name ASC'),
-
-  getPlaylistById: (id) => get('SELECT * FROM playlists WHERE id = ?', [Number(id)]),
-
-  getPlaylistTracks: (playlistId) => all(`
-    SELECT t.*, pt.position, pt.added_at as added_to_playlist
-    FROM tracks t
-    INNER JOIN playlist_tracks pt ON t.id = pt.track_id
-    WHERE pt.playlist_id = ?
-    ORDER BY pt.position ASC
-  `, [Number(playlistId)]),
-
-  createPlaylist: (name, description = '', color = null) => {
-    const r = run(
-      'INSERT INTO playlists (name, description, color) VALUES (?, ?, ?)',
-      [name, description || '', color]
-    )
-    return Number(r.lastInsertRowid)
-  },
-
-  updatePlaylist: (id, name, description) => run(
-    "UPDATE playlists SET name=?, description=?, updated_at=strftime('%s','now') WHERE id=?",
-    [name, description || '', Number(id)]
-  ),
-
-  deletePlaylist: (id) => run('DELETE FROM playlists WHERE id = ?', [Number(id)]),
-
-  addTrackToPlaylist: (playlistId, trackId) => {
-    const r = get('SELECT MAX(position) as pos FROM playlist_tracks WHERE playlist_id = ?', [Number(playlistId)])
-    const position = (r && r.pos != null) ? r.pos + 1 : 0
-    try {
-      run('INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position) VALUES (?,?,?)',
-        [Number(playlistId), Number(trackId), position])
-    } catch (e) { /* duplicate — already in playlist */ }
-  },
-
-  removeTrackFromPlaylist: (playlistId, trackId) => run(
-    'DELETE FROM playlist_tracks WHERE playlist_id=? AND track_id=?',
-    [Number(playlistId), Number(trackId)]
-  ),
-
-  reorderPlaylistTracks: (playlistId, trackIds) => {
-    trackIds.forEach((id, idx) => {
-      run('UPDATE playlist_tracks SET position=? WHERE playlist_id=? AND track_id=?',
-        [idx, Number(playlistId), Number(id)])
+  // ── Tracks ────────────────────────────────────────────────────────────────
+  getAllTracks: () => {
+    return [..._db.tracks].sort((a, b) => {
+      const ca = (a.artist || '') + (a.album || '') + (String(a.track_number || 9999)).padStart(4, '0') + (a.title || '')
+      const cb = (b.artist || '') + (b.album || '') + (String(b.track_number || 9999)).padStart(4, '0') + (b.title || '')
+      return ca.localeCompare(cb)
     })
   },
 
-  // ── Library paths ──────────────────────────────────────────────────────────
-  getLibraryPaths: () => all('SELECT * FROM library_paths WHERE enabled=1 ORDER BY path ASC'),
+  getTrackById: (id) => _db.tracks.find(t => t.id === Number(id)) || null,
 
-  addLibraryPath: (dirPath) => {
-    try { run('INSERT OR IGNORE INTO library_paths (path) VALUES (?)', [dirPath]) } catch (e) {}
+  getTrackByPath: (filePath) => _db.tracks.find(t => t.file_path === filePath) || null,
+
+  searchTracks: (query, limit = 500) => {
+    const q = query.toLowerCase()
+    return _db.tracks
+      .filter(t =>
+        (t.title  || '').toLowerCase().includes(q) ||
+        (t.artist || '').toLowerCase().includes(q) ||
+        (t.album  || '').toLowerCase().includes(q) ||
+        (t.genre  || '').toLowerCase().includes(q)
+      )
+      .slice(0, limit)
   },
 
-  removeLibraryPath: (dirPath) => run('DELETE FROM library_paths WHERE path=?', [dirPath]),
+  getTracksByArtist: (artist) =>
+    _db.tracks.filter(t => t.artist === artist)
+      .sort((a, b) => (a.album || '').localeCompare(b.album || '') || (a.track_number || 0) - (b.track_number || 0)),
 
-  updateLibraryPathScan: (dirPath) => run(
-    "UPDATE library_paths SET last_scan=strftime('%s','now') WHERE path=?", [dirPath]
-  ),
+  getTracksByAlbum: (album, artist) =>
+    _db.tracks.filter(t => t.album === album && t.artist === artist)
+      .sort((a, b) => (a.disc_number || 0) - (b.disc_number || 0) || (a.track_number || 0) - (b.track_number || 0)),
 
-  // ── Stats ──────────────────────────────────────────────────────────────────
-  getLibraryStats: () => get(`
-    SELECT
-      COUNT(*) as total_tracks,
-      COUNT(DISTINCT artist) as total_artists,
-      COUNT(DISTINCT album) as total_albums,
-      COALESCE(SUM(duration), 0) as total_duration,
-      COALESCE(SUM(file_size), 0) as total_size,
-      COUNT(CASE WHEN favorite=1 THEN 1 END) as favorite_count
-    FROM tracks
-  `),
+  getFavoriteTracks: () =>
+    _db.tracks.filter(t => t.favorite).sort((a, b) => (a.title || '').localeCompare(b.title || '')),
 
-  // ── Artwork cache ──────────────────────────────────────────────────────────
-  getArtwork: (hash) => get('SELECT * FROM artwork_cache WHERE hash=?', [hash]),
+  getRecentlyPlayed: (limit = 50) => {
+    const recent = [..._db.playHistory]
+      .sort((a, b) => b.played_at - a.played_at)
+    const seen = new Set()
+    const ids = []
+    for (const h of recent) {
+      if (!seen.has(h.track_id)) { seen.add(h.track_id); ids.push(h.track_id) }
+      if (ids.length >= limit) break
+    }
+    return ids.map(id => _db.tracks.find(t => t.id === id)).filter(Boolean)
+  },
+
+  getMostPlayed: (limit = 50) =>
+    [..._db.tracks].sort((a, b) => (b.plays || 0) - (a.plays || 0)).slice(0, limit),
+
+  upsertTrack: (track) => {
+    const idx = _db.tracks.findIndex(t => t.file_path === track.file_path)
+    if (idx >= 0) {
+      _db.tracks[idx] = { ..._db.tracks[idx], ...track }
+      _flush('tracks')
+      return { id: _db.tracks[idx].id, updated: true }
+    }
+    const id = _nextId('track')
+    const newTrack = { ...track, id, plays: 0, favorite: false, date_added: Date.now() }
+    _db.tracks.push(newTrack)
+    _flush('tracks')
+    return { id, updated: false }
+  },
+
+  // Bulk upsert used at end of scan for performance (one disk write)
+  bulkUpsertTracks: (tracks) => {
+    let added = 0, updated = 0
+    for (const track of tracks) {
+      const idx = _db.tracks.findIndex(t => t.file_path === track.file_path)
+      if (idx >= 0) {
+        _db.tracks[idx] = { ..._db.tracks[idx], ...track }
+        updated++
+      } else {
+        const id = _nextId('track')
+        _db.tracks.push({ ...track, id, plays: 0, favorite: false, date_added: Date.now() })
+        added++
+      }
+    }
+    _flush('tracks')
+    return { added, updated }
+  },
+
+  updateTrackPlays: (id) => {
+    const t = _db.tracks.find(t => t.id === Number(id))
+    if (t) { t.plays = (t.plays || 0) + 1; t.last_played = Date.now(); _flush('tracks') }
+    const hid = _nextId('history')
+    _db.playHistory.push({ id: hid, track_id: Number(id), played_at: Date.now() })
+    // Keep history capped at 5000
+    if (_db.playHistory.length > 5000) _db.playHistory = _db.playHistory.slice(-5000)
+    _flush('playHistory')
+  },
+
+  toggleFavorite: (id) => {
+    const t = _db.tracks.find(t => t.id === Number(id))
+    if (t) { t.favorite = !t.favorite; _flush('tracks'); return { favorite: t.favorite } }
+    return null
+  },
+
+  removeTrack: (filePath) => {
+    const before = _db.tracks.length
+    _db.tracks = _db.tracks.filter(t => t.file_path !== filePath)
+    if (_db.tracks.length !== before) _flush('tracks')
+  },
+
+  removeStaleTracks: (validPaths) => {
+    const valid = new Set(validPaths)
+    const before = _db.tracks.length
+    _db.tracks = _db.tracks.filter(t => valid.has(t.file_path))
+    if (_db.tracks.length !== before) _flush('tracks')
+    return before - _db.tracks.length
+  },
+
+  // ── Albums & Artists ──────────────────────────────────────────────────────
+  getAllAlbums: () => {
+    const map = new Map()
+    for (const t of _db.tracks) {
+      const key = (t.album || '') + '|||' + (t.artist || '')
+      if (!map.has(key)) {
+        map.set(key, { title: t.album || 'Unknown Album', artist: t.artist || 'Unknown Artist',
+          year: t.year, track_count: 0, total_duration: 0, artwork_path: t.artwork_path, color: t.color })
+      }
+      const a = map.get(key)
+      a.track_count++
+      a.total_duration += t.duration || 0
+      if (!a.year && t.year) a.year = t.year
+      if (!a.artwork_path && t.artwork_path) a.artwork_path = t.artwork_path
+    }
+    return [...map.values()].sort((a, b) => (a.artist || '').localeCompare(b.artist || ''))
+  },
+
+  getAllArtists: () => {
+    const map = new Map()
+    for (const t of _db.tracks) {
+      const name = t.artist || 'Unknown Artist'
+      if (!map.has(name)) map.set(name, { name, album_count: new Set(), track_count: 0, total_duration: 0 })
+      const a = map.get(name)
+      a.album_count.add(t.album || '')
+      a.track_count++
+      a.total_duration += t.duration || 0
+    }
+    return [...map.values()]
+      .map(a => ({ ...a, album_count: a.album_count.size }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  },
+
+  getLibraryStats: () => {
+    const artists = new Set(_db.tracks.map(t => t.artist))
+    const albums  = new Set(_db.tracks.map(t => t.album))
+    return {
+      total_tracks:   _db.tracks.length,
+      total_artists:  artists.size,
+      total_albums:   albums.size,
+      total_duration: _db.tracks.reduce((s, t) => s + (t.duration || 0), 0),
+      total_size:     _db.tracks.reduce((s, t) => s + (t.file_size || 0), 0),
+      favorite_count: _db.tracks.filter(t => t.favorite).length,
+    }
+  },
+
+  // ── Playlists ─────────────────────────────────────────────────────────────
+  getAllPlaylists: () => [..._db.playlists].sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+
+  getPlaylistById: (id) => _db.playlists.find(p => p.id === Number(id)) || null,
+
+  getPlaylistTracks: (playlistId) => {
+    const pid = Number(playlistId)
+    const pts = _db.playlistTracks.filter(pt => pt.playlist_id === pid).sort((a, b) => a.position - b.position)
+    return pts.map(pt => {
+      const track = _db.tracks.find(t => t.id === pt.track_id)
+      return track ? { ...track, position: pt.position, added_to_playlist: pt.added_at } : null
+    }).filter(Boolean)
+  },
+
+  createPlaylist: (name, description, color) => {
+    const id = _nextId('playlist')
+    _db.playlists.push({ id, name: name || 'New Playlist', description: description || '',
+      color: color || null, created_at: Date.now(), updated_at: Date.now() })
+    _flush('playlists')
+    return id
+  },
+
+  updatePlaylist: (id, name, description) => {
+    const p = _db.playlists.find(p => p.id === Number(id))
+    if (p) { p.name = name; p.description = description || ''; p.updated_at = Date.now(); _flush('playlists') }
+  },
+
+  deletePlaylist: (id) => {
+    const pid = Number(id)
+    _db.playlists      = _db.playlists.filter(p => p.id !== pid)
+    _db.playlistTracks = _db.playlistTracks.filter(pt => pt.playlist_id !== pid)
+    _flush('playlists'); _flush('playlistTracks')
+  },
+
+  addTrackToPlaylist: (playlistId, trackId) => {
+    const pid = Number(playlistId), tid = Number(trackId)
+    if (_db.playlistTracks.some(pt => pt.playlist_id === pid && pt.track_id === tid)) return
+    const pts = _db.playlistTracks.filter(pt => pt.playlist_id === pid)
+    const pos = pts.length > 0 ? Math.max(...pts.map(pt => pt.position)) + 1 : 0
+    const id  = _nextId('pt')
+    _db.playlistTracks.push({ id, playlist_id: pid, track_id: tid, position: pos, added_at: Date.now() })
+    _flush('playlistTracks')
+  },
+
+  removeTrackFromPlaylist: (playlistId, trackId) => {
+    const pid = Number(playlistId), tid = Number(trackId)
+    _db.playlistTracks = _db.playlistTracks.filter(pt => !(pt.playlist_id === pid && pt.track_id === tid))
+    _flush('playlistTracks')
+  },
+
+  reorderPlaylistTracks: (playlistId, trackIds) => {
+    const pid = Number(playlistId)
+    trackIds.forEach((tid, pos) => {
+      const pt = _db.playlistTracks.find(pt => pt.playlist_id === pid && pt.track_id === Number(tid))
+      if (pt) pt.position = pos
+    })
+    _flush('playlistTracks')
+  },
+
+  // ── Library Paths ─────────────────────────────────────────────────────────
+  getLibraryPaths: () => _db.libraryPaths.filter(p => p.enabled),
+
+  addLibraryPath: (dirPath) => {
+    if (_db.libraryPaths.some(p => p.path === dirPath)) return
+    _db.libraryPaths.push({ id: Date.now(), path: dirPath, enabled: true, added_at: Date.now(), last_scan: null })
+    _flush('libraryPaths')
+  },
+
+  removeLibraryPath: (dirPath) => {
+    _db.libraryPaths = _db.libraryPaths.filter(p => p.path !== dirPath)
+    _flush('libraryPaths')
+  },
+
+  updateLibraryPathScan: (dirPath) => {
+    const p = _db.libraryPaths.find(p => p.path === dirPath)
+    if (p) { p.last_scan = Date.now(); _flush('libraryPaths') }
+  },
+
+  // ── Artwork Cache ─────────────────────────────────────────────────────────
+  getArtwork: (hash) => {
+    const fp = _db.artworkCache[hash]
+    return fp ? { hash, file_path: fp } : null
+  },
 
   cacheArtwork: (hash, filePath) => {
-    try { run('INSERT OR REPLACE INTO artwork_cache (hash, file_path) VALUES (?,?)', [hash, filePath]) } catch (e) {}
-  }
+    _db.artworkCache[hash] = filePath
+    _flush('artworkCache')
+  },
 }
 
-function getDb() {
-  if (!db) throw new Error('Database not initialized — call initDatabase() first')
-  return db
-}
+function getDb() { return store }
 
 module.exports = { initDatabase, getDb, queries }
