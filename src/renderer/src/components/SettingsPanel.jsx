@@ -3,7 +3,7 @@ import { HWButton, ToggleSwitch } from './UIComponents'
 import { useLibrary } from '../store/LibraryStore'
 
 export function SettingsPanel({ theme: T, darkMode, onToggleDark, visualizerType, onVisualizerChange }) {
-  const { state, addLibraryPath, removeLibraryPath, scanLibrary, importPlaylist } = useLibrary()
+  const { state, addLibraryPath, removeLibraryPath, scanLibrary, importFiles, importPlaylist } = useLibrary()
   const [appVersion, setAppVersion] = useState('1.0.0')
   const [settings, setSettings] = useState({
     minimizeToTray: true,
@@ -80,8 +80,9 @@ export function SettingsPanel({ theme: T, darkMode, onToggleDark, visualizerType
               ))
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <HWButton theme={T} onClick={addLibraryPath}>+ ADD FOLDER</HWButton>
+            <HWButton theme={T} onClick={() => importFiles()}>⇩ IMPORT FILES</HWButton>
             <HWButton theme={T} onClick={() => scanLibrary()} active={state.scanning}>
               {state.scanning ? '⟳ SCANNING...' : '⟳ SCAN NOW'}
             </HWButton>

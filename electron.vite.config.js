@@ -10,7 +10,9 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.js')
         },
-        external: ['better-sqlite3', 'music-metadata', 'electron-store', 'chokidar', 'glob', 'sharp']
+        // externalizeDepsPlugin handles all node_modules automatically.
+        // Only list packages here that need special treatment.
+        external: ['node-sqlite3-wasm', 'music-metadata', 'electron-store', 'chokidar', 'glob']
       }
     }
   },

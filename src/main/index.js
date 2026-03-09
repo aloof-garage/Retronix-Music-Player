@@ -1,12 +1,21 @@
 'use strict'
 
-const { app, BrowserWindow, ipcMain, globalShortcut, nativeTheme, dialog, shell, protocol } = require('electron')
+const { app, BrowserWindow, globalShortcut, shell, protocol, net } = require('electron')
 const path = require('path')
-const { createTrayManager } = require('./trayManager')
-const { registerMediaKeys } = require('./mediaKeys')
-const { registerIpcHandlers } = require('./ipcHandlers')
-const { initDatabase } = require('./database/db')
 const Store = require('electron-store')
+
+// ── registerSchemesAsPrivileged MUST be called before app is ready ────────────
+// This makes retronix:// fetchable from the renderer via fetch() / Web Audio API.
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'retronix',
+  privileges: {
+    secure: true,
+    standard: true,
+    supportFetchAPI: true,   // enables fetch() in renderer
+    corsEnabled: true,
+    stream: true,            // enables streaming (important for large audio files)
+  }
+}])
 
 // ── Electron Store (persistent settings) ─────────────────────────────────────
 const store = new Store({
@@ -23,41 +32,31 @@ const store = new Store({
     },
     libraryPaths: [],
     visualizer: { type: 'spectrum', fps: 60 },
-    playback: {
-      shuffle: false,
-      repeat: 0,
-      crossfade: 0,
-      gapless: true
-    },
+    playback: { shuffle: false, repeat: 0, crossfade: 0, gapless: true },
     startMinimized: false,
     minimizeToTray: true,
     lastSection: 'library'
   }
 })
 
-// ── Make store accessible from IPC handlers ──────────────────────────────────
 global.store = store
 
 let mainWindow = null
 let trayManager = null
 
-// ── Protocol registration for local audio files ───────────────────────────────
-app.whenReady().then(() => {
-  protocol.registerFileProtocol('retronix', (request, callback) => {
-    const filePath = decodeURIComponent(request.url.replace('retronix:///', ''))
-    callback({ path: filePath })
-  })
-})
+// ── Single-instance lock ──────────────────────────────────────────────────────
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+  process.exit(0)
+}
 
 // ── Create main window ────────────────────────────────────────────────────────
 function createMainWindow() {
   const { width, height } = store.get('windowBounds')
 
   mainWindow = new BrowserWindow({
-    width,
-    height,
-    minWidth: 900,
-    minHeight: 600,
+    width, height, minWidth: 900, minHeight: 600,
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#12141f',
@@ -68,12 +67,11 @@ function createMainWindow() {
       nodeIntegration: false,
       webSecurity: true,
       allowRunningInsecureContent: false,
-      experimentalFeatures: true // For Web Audio API
     },
     icon: path.join(__dirname, '../../resources/icon.png')
   })
 
-  // Load the renderer
+  // Load renderer
   if (process.env.NODE_ENV === 'development' || process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL || 'http://localhost:5173')
     mainWindow.webContents.openDevTools({ mode: 'detach' })
@@ -81,31 +79,20 @@ function createMainWindow() {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 
-  // ── Window ready ─────────────────────────────────────────────────────────
   mainWindow.once('ready-to-show', () => {
-    if (!store.get('startMinimized')) {
-      mainWindow.show()
-    }
-    if (store.get('windowMaximized')) {
-      mainWindow.maximize()
-    }
+    if (!store.get('startMinimized')) mainWindow.show()
+    if (store.get('windowMaximized')) mainWindow.maximize()
   })
 
-  // ── Save window bounds ────────────────────────────────────────────────────
   mainWindow.on('resize', () => {
-    if (!mainWindow.isMaximized()) {
-      store.set('windowBounds', mainWindow.getBounds())
-    }
+    if (!mainWindow.isMaximized()) store.set('windowBounds', mainWindow.getBounds())
   })
   mainWindow.on('move', () => {
-    if (!mainWindow.isMaximized()) {
-      store.set('windowBounds', mainWindow.getBounds())
-    }
+    if (!mainWindow.isMaximized()) store.set('windowBounds', mainWindow.getBounds())
   })
   mainWindow.on('maximize', () => store.set('windowMaximized', true))
   mainWindow.on('unmaximize', () => store.set('windowMaximized', false))
 
-  // ── Minimize to tray ──────────────────────────────────────────────────────
   mainWindow.on('close', (e) => {
     if (store.get('minimizeToTray') && trayManager) {
       e.preventDefault()
@@ -113,11 +100,8 @@ function createMainWindow() {
     }
   })
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
+  mainWindow.on('closed', () => { mainWindow = null })
 
-  // ── Handle drag-and-drop files ────────────────────────────────────────────
   mainWindow.webContents.on('will-navigate', (e, url) => {
     e.preventDefault()
     if (!url.startsWith('http://localhost') && !url.startsWith('file://')) {
@@ -130,33 +114,59 @@ function createMainWindow() {
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  // Initialize database
+
+  // ── Register retronix:// protocol ─────────────────────────────────────────
+  // Uses protocol.handle (Electron 25+) which is fetchable from renderer.
+  protocol.handle('retronix', (request) => {
+    // URL is retronix:///path/to/file (or retronix:///C:/path on Windows)
+    // Decode the path component after the triple slash.
+    const encoded = request.url.slice('retronix:///'.length)
+    let filePath = decodeURIComponent(encoded)
+
+    // On Windows paths arrive as C:/... (already forward slashes from encodeURIComponent)
+    // net.fetch requires file:/// prefix
+    const fileUrl = 'file:///' + filePath.replace(/\\/g, '/')
+    return net.fetch(fileUrl)
+  })
+
+  // ── Init database ──────────────────────────────────────────────────────────
+  const { initDatabase } = require('./database/db')
   try {
-    await initDatabase()
+    initDatabase()
     console.log('[Main] Database initialized')
   } catch (err) {
     console.error('[Main] Database init error:', err)
   }
 
-  // Create window
+  // ── Create window ──────────────────────────────────────────────────────────
   createMainWindow()
 
-  // System tray
+  // ── Tray ──────────────────────────────────────────────────────────────────
+  const { createTrayManager } = require('./trayManager')
   trayManager = createTrayManager(mainWindow, store)
+  global.trayManager = trayManager
 
-  // Media keys
+  // ── Media keys ────────────────────────────────────────────────────────────
+  const { registerMediaKeys } = require('./mediaKeys')
   registerMediaKeys(mainWindow)
 
-  // IPC handlers
+  // ── IPC handlers ──────────────────────────────────────────────────────────
+  const { registerIpcHandlers } = require('./ipcHandlers')
   registerIpcHandlers(mainWindow, store)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow()
-    } else if (mainWindow) {
-      mainWindow.show()
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
+    else if (mainWindow) mainWindow.show()
   })
+})
+
+app.on('second-instance', (event, argv) => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.focus()
+    const filePath = argv.find(arg => /\.(mp3|flac|wav|aac|ogg|m4a|wma|opus)$/i.test(arg))
+    if (filePath) mainWindow.webContents.send('open-file', filePath)
+  }
 })
 
 app.on('window-all-closed', () => {
@@ -170,30 +180,9 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
 })
 
-// ── Open files from CLI / file association ────────────────────────────────────
 app.on('open-file', (event, filePath) => {
   event.preventDefault()
-  if (mainWindow) {
-    mainWindow.webContents.send('open-file', filePath)
-  }
+  if (mainWindow) mainWindow.webContents.send('open-file', filePath)
 })
-
-// ── Second instance (single instance lock) ───────────────────────────────────
-const gotLock = app.requestSingleInstanceLock()
-if (!gotLock) {
-  app.quit()
-} else {
-  app.on('second-instance', (event, argv) => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-      // Check for file arguments
-      const filePath = argv.find(arg => /\.(mp3|flac|wav|aac|ogg|m4a)$/i.test(arg))
-      if (filePath) {
-        mainWindow.webContents.send('open-file', filePath)
-      }
-    }
-  })
-}
 
 module.exports = { getMainWindow: () => mainWindow, getStore: () => store }

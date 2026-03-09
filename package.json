@@ -1,26 +1,19 @@
 {
   "name": "retronix-music-player",
   "version": "1.0.0",
-  "description": "Retronix MK·II — A skeuomorphic desktop music player with vintage Hi-Fi aesthetics",
+  "description": "Retronix MK·II — A skeuomorphic desktop music player",
   "main": "src/main/index.js",
-  "homepage": "https://github.com/retronix/music-player",
   "author": "Retronix Audio",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "preview": "electron-vite preview",
     "start": "electron .",
     "package": "electron-builder",
-    "package:win": "electron-builder --win",
-    "package:mac": "electron-builder --mac",
-    "package:linux": "electron-builder --linux",
-    "lint": "eslint . --ext .js,.jsx"
+    "package:win": "electron-builder --win"
   },
   "dependencies": {
-    "node-sqlite3-wasm": "^0.8.18",
     "music-metadata": "^7.14.0",
-    "node-id3": "^0.2.6",
     "glob": "^10.3.10",
     "chokidar": "^3.6.0",
     "electron-store": "^8.1.0"
@@ -30,8 +23,6 @@
     "electron": "^29.1.4",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.1.0",
-    "eslint": "^8.57.0",
-    "eslint-plugin-react": "^7.34.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "vite": "^5.1.6"
@@ -39,43 +30,20 @@
   "build": {
     "appId": "com.retronix.musicplayer",
     "productName": "Retronix Music Player",
-    "copyright": "Copyright © 2024 Retronix Audio",
-    "directories": {
-      "buildResources": "resources",
-      "output": "dist"
-    },
-    "files": [
-      "out/**/*",
-      "!out/**/*.map"
-    ],
-    "win": {
-      "target": ["nsis", "portable"],
-      "icon": "resources/icon.ico",
-      "requestedExecutionLevel": "asInvoker"
-    },
-    "mac": {
-      "target": ["dmg", "zip"],
-      "icon": "resources/icon.icns",
-      "category": "public.app-category.music"
-    },
-    "linux": {
-      "target": ["AppImage", "deb"],
-      "icon": "resources/icon.png",
-      "category": "Audio"
-    },
+    "directories": { "buildResources": "resources", "output": "dist" },
+    "files": ["out/**/*"],
+    "win": { "target": ["nsis", "portable"] },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "allowToChangeInstallationDirectory": true
     },
     "fileAssociations": [
       { "ext": "mp3", "name": "MP3 Audio", "role": "Viewer" },
       { "ext": "flac", "name": "FLAC Audio", "role": "Viewer" },
       { "ext": "wav", "name": "WAV Audio", "role": "Viewer" },
+      { "ext": "m4a", "name": "M4A Audio", "role": "Viewer" },
       { "ext": "aac", "name": "AAC Audio", "role": "Viewer" },
-      { "ext": "ogg", "name": "OGG Audio", "role": "Viewer" },
-      { "ext": "m4a", "name": "M4A Audio", "role": "Viewer" }
+      { "ext": "ogg", "name": "OGG Audio", "role": "Viewer" }
     ]
   }
 }

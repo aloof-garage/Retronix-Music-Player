@@ -279,11 +279,11 @@ export function ArtistsView({ theme: T, onArtistSelect }) {
 
 // ── Empty State ───────────────────────────────────────────────────────────────
 function EmptyState({ theme: T, section }) {
-  const { addLibraryPath, scanLibrary, state } = useLibrary()
+  const { addLibraryPath, scanLibrary, importFiles, state } = useLibrary()
 
   const message = section === 'favorites'
     ? 'No favorites yet. Click ♡ on any track to add it here.'
-    : 'Your library is empty. Add a folder to get started.'
+    : 'Your library is empty. Add a folder or import individual files to get started.'
 
   return (
     <div style={{
@@ -295,8 +295,9 @@ function EmptyState({ theme: T, section }) {
         {message}
       </div>
       {section !== 'favorites' && (
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
           <HWButton theme={T} onClick={addLibraryPath}>+ ADD FOLDER</HWButton>
+          <HWButton theme={T} onClick={() => importFiles()}>⇩ IMPORT FILES</HWButton>
           {state.libraryPaths?.length > 0 && (
             <HWButton theme={T} onClick={() => scanLibrary()}>⟳ SCAN LIBRARY</HWButton>
           )}

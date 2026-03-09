@@ -1,222 +1,151 @@
-# 🎛️ Retronix Music Player MK·II
+# Retronix MK·II — Desktop Music Player
 
-A production-ready desktop music player with a **skeuomorphic Hi-Fi aesthetic** — built with Electron, React, and Web Audio API.
-
-![Retronix MK·II](resources/screenshot.png)
+A skeuomorphic Hi-Fi desktop music player built with Electron 29, React 18, and the Web Audio API.
 
 ---
 
-## ✨ Features
+## Prerequisites
 
-| Feature | Description |
-|---|---|
-| 🎵 **Audio Engine** | Web Audio API with gapless playback & crossfade |
-| 🎚️ **10-Band EQ** | BiquadFilter nodes, 31Hz–16kHz, ±12dB |
-| 📊 **5 Visualizers** | Spectrum, Waveform, LED Bars, Circular, Oscilloscope |
-| 📁 **Library Scanner** | Recursive scan, metadata extraction, SQLite database |
-| 🎨 **Skeuomorphic UI** | Rotary knobs, VU meters, LED indicators, LCD displays |
-| 🌙 **Dark/Light** | Full theme system with neumorphic shadows |
-| 📋 **Playlists** | Create, reorder, M3U import/export |
-| 🔀 **Queue System** | Shuffle, repeat, play next |
-| 🔔 **System Tray** | Background playback, tray controls |
-| ⌨️ **Media Keys** | Global keyboard media key support |
-| 🗄️ **SQLite DB** | Full library with search, indexing, play history |
+| Tool | Version | Notes |
+|------|---------|-------|
+| Node.js | 18–22 | **Node 24 works too** |
+| npm | 9+ | bundled with Node |
 
-## 🎵 Supported Formats
-
-`MP3` · `FLAC` · `WAV` · `AAC` · `OGG` · `M4A` · `WMA` · `OPUS`
+> **No C++ compiler or Visual Studio required.** All SQLite access uses `node-sqlite3-wasm` (pure WebAssembly).
 
 ---
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **Node.js** v18+ 
-- **npm** v9+
-- **Python** 3.x (for native module compilation)
-- **Visual Studio Build Tools** (Windows) or **Xcode CLI Tools** (macOS)
-
-### Installation
+## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/retronix/music-player.git
+# 1. Clone / extract the project
 cd retronix-music-player
 
-# Install dependencies
+# 2. Install dependencies (no native compilation needed)
 npm install
 
-# Rebuild native modules (better-sqlite3)
-npm run rebuild
-
-# Start in development mode
+# 3. Start in development mode
 npm run dev
 ```
 
----
-
-## 🏗️ Architecture
-
-```
-retronix-music-player/
-├── src/
-│   ├── main/                    # Electron main process
-│   │   ├── index.js             # App entry, window management
-│   │   ├── ipcHandlers.js       # IPC channel handlers
-│   │   ├── trayManager.js       # System tray
-│   │   ├── mediaKeys.js         # Global media key shortcuts
-│   │   ├── libraryScanner.js    # File scanning & metadata extraction
-│   │   └── database/
-│   │       └── db.js            # SQLite schema, queries, migrations
-│   ├── preload/
-│   │   └── index.js             # Secure contextBridge API
-│   └── renderer/
-│       ├── index.html
-│       └── src/
-│           ├── App.jsx           # Root component
-│           ├── engine/
-│           │   ├── AudioEngine.js   # Web Audio API engine
-│           │   └── Visualizer.js    # Canvas visualizers
-│           ├── store/
-│           │   ├── PlayerStore.jsx  # Playback state (Context + Reducer)
-│           │   └── LibraryStore.jsx # Library state
-│           ├── components/
-│           │   ├── TopBar.jsx
-│           │   ├── Sidebar.jsx
-│           │   ├── PlaybackConsole.jsx
-│           │   ├── LibraryView.jsx
-│           │   ├── EqualizerPanel.jsx
-│           │   ├── VisualizerPanel.jsx
-│           │   ├── PlaylistsPanel.jsx
-│           │   ├── QueuePanel.jsx
-│           │   ├── SettingsPanel.jsx
-│           │   └── UIComponents.jsx
-│           └── utils/
-│               ├── themes.js        # Dark/Light theme tokens
-│               └── helpers.js       # Utility functions
-├── resources/                   # Icons, assets
-├── electron.vite.config.js      # Build config
-└── package.json
-```
+The app window will open automatically. Dev Tools open in a detached window.
 
 ---
 
-## 🔌 IPC API
+## Adding Music
 
-The preload script exposes `window.electronAPI` with the following namespaces:
+Three ways to add songs:
 
-```js
-window.electronAPI.window   // minimize, maximize, close
-window.electronAPI.settings // get, set, getAll, reset
-window.electronAPI.library  // getAllTracks, search, scan, toggleFavorite...
-window.electronAPI.playlist // getAll, create, delete, addTrack, export...
-window.electronAPI.audio    // getFilePath, openFile
-window.electronAPI.artwork  // get(filePath)
-window.electronAPI.tray     // updateTrack, updatePlayState
-window.electronAPI.notify   // trackChanged
-window.electronAPI.system   // getAppVersion, openExternal, platform
-window.electronAPI.on       // event listener (media-key, tray-action, scan:*)
-```
+### A — Add a folder (recommended)
+1. Go to **Settings** (gear icon, top-right) → **Music Library**
+2. Click **+ ADD FOLDER** and pick your music directory
+3. The library scans automatically — progress shows in the sidebar
 
----
+Or click **+ ADD FOLDER** on the empty library screen.
 
-## 🎚️ Audio Signal Chain
+### B — Import individual files
+1. Click **⇩ IMPORT FILES** (Settings or empty library screen)
+2. Select one or more `.mp3 / .flac / .wav / .aac / .ogg / .m4a` files
+3. They appear in the library immediately
 
-```
-File
- └─▶ ArrayBuffer (fetch)
-      └─▶ AudioContext.decodeAudioData()
-           └─▶ AudioBufferSourceNode
-                └─▶ BiquadFilterNode[31Hz]
-                     └─▶ BiquadFilterNode[62Hz]
-                          └─▶ ... (10 bands)
-                               └─▶ BiquadFilterNode[16kHz]
-                                    └─▶ GainNode (crossfade)
-                                         └─▶ GainNode (volume)
-                                              └─▶ AnalyserNode (FFT)
-                                                   └─▶ AudioContext.destination
-```
+### C — Drag & drop / file association
+- Pass a file path on the command line: `retronix-music-player song.mp3`
+- Double-click an associated audio file (after building the installer)
 
 ---
 
-## 🗄️ Database Schema
+## Playing Music
 
-SQLite database stored at `%APPDATA%/retronix-music-player/library.db`
-
-**Tables:** `tracks`, `albums`, `artists`, `playlists`, `playlist_tracks`, `play_history`, `library_paths`, `artwork_cache`
-
-Key optimizations:
-- WAL journal mode
-- Indexed queries on `artist`, `album`, `title`, `plays`, `favorite`
-- 256MB mmap for large libraries
-- Incremental scanning (skip unchanged files by `last_modified` timestamp)
+- **Double-click** any track in the library to play it
+- The full album/playlist becomes the queue automatically
+- **Prev / Play / Pause / Next** buttons in the bottom bar
+- **Drag** the progress slider to seek
+- **Drag** the Volume knob up/down to change volume
+- **Bass / Mid / Treble** mini-knobs provide quick EQ
 
 ---
 
-## 🎨 Theme System
+## Playlists
 
-Two built-in themes with full neumorphic shadow tokens:
-
-```js
-const T = getTheme(isDark)  // Returns theme object with:
-// T.bg, T.surface, T.surfaceDeep, T.surfaceRaised
-// T.text, T.textMuted, T.accent
-// T.shadowDown, T.shadowUp
-// T.neumorphOut, T.neumorphIn
-// T.lcdBg, T.lcdText, T.vuActive, T.vuWarn, T.vuClip
-// T.spectrumTop, T.spectrumBottom, T.eqBar
-// T.knobBg, T.knobIndicator
-```
+1. Navigate to **Playlists** in the sidebar
+2. Click **+ NEW** to create a playlist
+3. Right-click tracks in the library (or use the menu) to add them
+4. **⇩ IMPORT** imports an `.m3u` / `.m3u8` file
+5. **⇑ EXPORT** saves the selected playlist as `.m3u8`
 
 ---
 
-## 📦 Build & Package
+## Building a Distributable
 
 ```bash
-# Build renderer + main
-npm run build
+# Windows installer + portable exe
+npm run package:win
 
-# Package for current platform
-npm run package
+# macOS dmg + zip
+npm run package:mac
 
-# Package for specific platforms
-npm run package:win    # Windows NSIS + portable
-npm run package:mac    # macOS DMG + zip
-npm run package:linux  # Linux AppImage + deb
+# Linux AppImage + deb
+npm run package:linux
 ```
 
-Output → `dist/`
+Outputs land in the `dist/` folder.
 
 ---
 
-## ⚡ Performance
+## Architecture
 
-| Metric | Target | Notes |
-|---|---|---|
-| Startup time | < 3s | Lazy library loading |
-| Memory usage | < 300MB | Virtualized lists |
-| Visualizer FPS | 60 fps | requestAnimationFrame |
-| Library size | 100K tracks | SQLite WAL + indexes |
-| Artwork cache | Unlimited | Hash-deduped JPEGs |
-
----
-
-## 🛠️ Development
-
-```bash
-npm run dev        # Start with hot-reload
-npm run lint       # ESLint
+```
+src/
+├── main/                   Electron main process
+│   ├── index.js            App bootstrap, protocol registration, window
+│   ├── ipcHandlers.js      All IPC channel handlers
+│   ├── libraryScanner.js   Recursive file scanner + metadata extraction
+│   ├── mediaKeys.js        Global media key shortcuts
+│   ├── trayManager.js      System tray icon + menu
+│   └── database/
+│       └── db.js           SQLite via node-sqlite3-wasm
+├── preload/
+│   └── index.js            contextBridge — exposes window.electronAPI
+└── renderer/src/
+    ├── App.jsx             Root component + settings persistence
+    ├── engine/
+    │   ├── AudioEngine.js  Web Audio API engine (EQ, analyser, seek)
+    │   └── Visualizer.js   Canvas visualizer (5 modes)
+    ├── store/
+    │   ├── PlayerStore.jsx React context — playback state + actions
+    │   └── LibraryStore.jsx React context — library + playlists
+    └── components/         UI components (all inline styles, no CSS files)
 ```
 
-DevTools open automatically in dev mode.
+### Audio Loading
+
+Files are read in the **main process** via `fs.readFileSync` and transferred to the renderer as base64 over IPC. The renderer decodes `base64 → ArrayBuffer → AudioBuffer` using the Web Audio API. This approach:
+
+- Bypasses all CSP restrictions
+- Works with any local path (including Windows `C:\...`)
+- Requires no special protocol configuration
+
+### Signal Chain
+
+```
+BufferSourceNode → EQ[10×BiquadFilter] → GainNode → MasterGain → AnalyserNode → AudioDestination
+```
 
 ---
 
-## 📜 License
+## Supported Formats
 
-MIT License — see [LICENSE](LICENSE)
+`mp3` · `flac` · `wav` · `aac` · `ogg` · `m4a` · `wma` · `opus`
 
 ---
 
-*Retronix MK·II — Your music, your hardware, your signal chain.*
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `npm install` fails | Make sure you are using Node 18–24. Run `node -v` to check. |
+| Library stays empty after scan | Check the console (DevTools) for `[Scanner]` log lines. Verify the folder path exists and contains supported audio files. |
+| `electron-vite` not found | Run `npm install` again; it installs to `node_modules/.bin/`. Use `npx electron-vite dev` if the PATH is not set. |
+| Audio won't play | Open DevTools console and look for `[AudioEngine]` errors. Confirm the file exists at the path shown in the error. |
+| Window doesn't appear | The app uses a frameless window — look in the taskbar/dock. |
+
