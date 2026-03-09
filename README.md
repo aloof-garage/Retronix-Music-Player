@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🎛️ Retronix Music Player MK·II
 
 A production-ready desktop music player with a **skeuomorphic Hi-Fi aesthetic** — built with Electron, React, and Web Audio API.
@@ -221,6 +220,3 @@ MIT License — see [LICENSE](LICENSE)
 ---
 
 *Retronix MK·II — Your music, your hardware, your signal chain.*
-=======
-# Retronix-Music-Player
->>>>>>> 6c88c049555ef63b09b034e24302e0c48f8002fa

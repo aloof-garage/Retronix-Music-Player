@@ -4,7 +4,7 @@ const { glob } = require('glob')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
-const { parseFile } = require('music-metadata')
+const mm = require('music-metadata')
 const { queries, getDb } = require('./database/db')
 
 const SUPPORTED_FORMATS = [
@@ -130,7 +130,7 @@ async function extractMetadata(filePath, stat) {
   let artworkHash = null
 
   try {
-    const parsed = await parseFile(filePath, {
+    const parsed = await mm.parseFile(filePath, {
       duration: true,
       skipCovers: false,
       includeChapters: false
@@ -232,14 +232,7 @@ async function saveArtwork(data, hash, format) {
 
   if (!fs.existsSync(filePath)) {
     try {
-      // Try to resize with sharp if available
-      try {
-        const sharp = require('sharp')
-        await sharp(data).resize(400, 400, { fit: 'cover' }).jpeg({ quality: 85 }).toFile(filePath)
-      } catch {
-        // Fallback: save raw
-        fs.writeFileSync(filePath, data)
-      }
+      fs.writeFileSync(filePath, data)
     } catch (err) {
       console.error('[Scanner] Failed to save artwork:', err.message)
       return null
