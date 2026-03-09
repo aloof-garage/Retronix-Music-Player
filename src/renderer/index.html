@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' 'unsafe-inline';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: file: retronix:;
+      media-src 'self' file: retronix: blob:;
+      connect-src 'self';
+    " />
+    <title>Retronix Music Player</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body, #root {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #12141f;
+      }
+      body {
+        font-family: 'Courier New', 'Lucida Console', monospace;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        user-select: none;
+      }
+      /* Scrollbar styling */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #2a2d3e; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #3a3d50; }
+      /* Range inputs */
+      input[type=range] {
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.jsx"></script>
+  </body>
+</html>
