@@ -39,13 +39,12 @@ function AppInner() {
     })
   }, [])
 
-  // ── Media keys / tray actions via IPC ──────────────────────────────────────
+  // ── Media keys / tray actions ──────────────────────────────────────────────
   useEffect(() => {
     if (!window.electronAPI) return
     const unsubs = [
       window.electronAPI.on('media-key',  (action) => window.dispatchEvent(new CustomEvent('retronix-media-key', { detail: action }))),
       window.electronAPI.on('tray-action',(action) => window.dispatchEvent(new CustomEvent('retronix-media-key', { detail: action }))),
-      // open-file: import the file then play it
       window.electronAPI.on('open-file', async (filePath) => {
         await importFiles([filePath])
         await loadLibrary()
@@ -54,13 +53,13 @@ function AppInner() {
     return () => unsubs.forEach(u => u?.())
   }, [importFiles, loadLibrary])
 
-  // ── Persist settings ──────────────────────────────────────────────────────
+  // ── Persist settings ───────────────────────────────────────────────────────
   useEffect(() => { window.electronAPI?.settings.set('theme', darkMode ? 'dark' : 'light') }, [darkMode])
   useEffect(() => { window.electronAPI?.settings.set('lastSection', activeSection) }, [activeSection])
   useEffect(() => { window.electronAPI?.settings.set('equalizer', { enabled: eqEnabled, bands: eqValues }) }, [eqEnabled, eqValues])
   useEffect(() => { window.electronAPI?.settings.set('visualizer', { type: visualizerType }) }, [visualizerType])
 
-  // ── EQ ────────────────────────────────────────────────────────────────────
+  // ── EQ ─────────────────────────────────────────────────────────────────────
   const handleEqChange = useCallback((freq, gain) => {
     setEqValues(prev => ({ ...prev, [freq]: gain }))
     setEqBand(freq, gain)
@@ -77,7 +76,7 @@ function AppInner() {
     search(query)
   }, [search])
 
-  // ── Content router ────────────────────────────────────────────────────────
+  // ── Content router ─────────────────────────────────────────────────────────
   const renderContent = () => {
     switch (activeSection) {
       case 'library':
@@ -131,7 +130,6 @@ function AppInner() {
   )
 }
 
-// ── Media key bridge: sits inside PlayerProvider so it can call player actions ─
 function MediaKeyBridge() {
   const { togglePlay, nextTrack, prevTrack } = usePlayer()
   useEffect(() => {

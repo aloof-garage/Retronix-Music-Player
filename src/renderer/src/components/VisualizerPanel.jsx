@@ -12,61 +12,52 @@ const VIZ_TYPES = [
 ]
 
 export function VisualizerPanel({ theme: T }) {
-  const canvasRef = useRef(null)
-  const vizRef = useRef(null)
+  const canvasRef  = useRef(null)
+  const vizRef     = useRef(null)
   const [vizType, setVizType] = useState('spectrum')
   const { getAnalyser, state } = usePlayer()
 
-  // ── Init visualizer ──────────────────────────────────────────────────────
+  // ── Init once: pass the getter so Visualizer fetches analyser each frame ──
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    const analyser = getAnalyser()
-    vizRef.current = new Visualizer(canvas, analyser, T)
-    vizRef.current.setType(vizType)
-    vizRef.current.start()
+    const viz = new Visualizer(canvas, getAnalyser, T)
+    viz.setType(vizType)
+    viz.start()
+    vizRef.current = viz
 
-    return () => vizRef.current?.stop()
+    return () => viz.stop()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // ── Update analyser when it changes ─────────────────────────────────────
+  // Keep the getter ref fresh in the Visualizer (e.g. after theme changes)
   useEffect(() => {
-    if (!vizRef.current) return
-    vizRef.current.analyser = getAnalyser()
-  }, [state.isPlaying, getAnalyser])
+    vizRef.current?.setAnalyserGetter(getAnalyser)
+  }, [getAnalyser])
 
-  // ── Update theme ─────────────────────────────────────────────────────────
+  // Theme updates
   useEffect(() => {
-    if (vizRef.current) vizRef.current.setTheme(T)
+    vizRef.current?.setTheme(T)
   }, [T])
 
-  // ── Change type ──────────────────────────────────────────────────────────
+  // Type changes — restart the visualizer on the same canvas
   const handleTypeChange = (type) => {
     setVizType(type)
-    if (vizRef.current) vizRef.current.setType(type)
+    vizRef.current?.setType(type)
   }
 
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 18, letterSpacing: '0.15em', color: T.text }}>VISUALIZER</h2>
-          <p style={{ margin: '2px 0 0', fontSize: 10, color: T.textMuted, letterSpacing: '0.1em' }}>
-            AUDIO SPECTRUM DISPLAY
-          </p>
+          <p style={{ margin: '2px 0 0', fontSize: 10, color: T.textMuted, letterSpacing: '0.1em' }}>AUDIO SPECTRUM DISPLAY</p>
         </div>
-        {/* Type selector */}
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {VIZ_TYPES.map(v => (
-            <HWButton
-              key={v.id}
-              size="sm"
-              theme={T}
-              active={vizType === v.id}
-              onClick={() => handleTypeChange(v.id)}
-            >
+            <HWButton key={v.id} size="sm" theme={T} active={vizType === v.id} onClick={() => handleTypeChange(v.id)}>
               {v.label}
             </HWButton>
           ))}
@@ -80,37 +71,24 @@ export function VisualizerPanel({ theme: T }) {
         boxShadow: `${T.neumorphIn}, 0 0 30px rgba(0,0,0,0.5)`,
         border: `1px solid ${T.border}`,
       }}>
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={300}
-          style={{ width: '100%', display: 'block', borderRadius: 6 }}
-        />
+        <canvas ref={canvasRef} width={800} height={300}
+          style={{ width: '100%', display: 'block', borderRadius: 6 }}/>
       </div>
 
-      {/* Info */}
+      {/* Info bar */}
       <div style={{
-        display: 'flex', gap: 12, marginTop: 16,
-        padding: 12, borderRadius: 10,
-        background: T.surfaceDeep, boxShadow: T.neumorphIn,
-        border: `1px solid ${T.border}`,
+        display: 'flex', gap: 12, marginTop: 16, padding: 12,
+        borderRadius: 10, background: T.surfaceDeep, boxShadow: T.neumorphIn, border: `1px solid ${T.border}`,
       }}>
         {[
-          ['STATUS', state.isPlaying ? 'PLAYING' : 'STOPPED'],
-          ['TRACK', state.currentTrack?.title || '—'],
-          ['TYPE', vizType.toUpperCase().replace('_', ' ')],
-          ['FPS', '60'],
+          ['STATUS',  state.isPlaying ? 'PLAYING' : state.currentTrack ? 'PAUSED' : 'STOPPED'],
+          ['TRACK',   state.currentTrack?.title || '—'],
+          ['ARTIST',  state.currentTrack?.artist || '—'],
+          ['MODE',    vizType.toUpperCase().replace('_', ' ')],
         ].map(([label, val]) => (
           <div key={label} style={{ flex: 1 }}>
-            <div style={{ fontSize: 8, color: T.textMuted, letterSpacing: '0.15em', marginBottom: 3 }}>
-              {label}
-            </div>
-            <div style={{
-              fontSize: 11, color: T.text, letterSpacing: '0.05em',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {val}
-            </div>
+            <div style={{ fontSize: 8, color: T.textMuted, letterSpacing: '0.15em', marginBottom: 3 }}>{label}</div>
+            <div style={{ fontSize: 11, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val}</div>
           </div>
         ))}
       </div>

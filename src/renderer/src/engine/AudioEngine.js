@@ -1,7 +1,8 @@
 // ── Retronix Audio Engine ──────────────────────────────────────────────────────
-// Web Audio API playback engine.
-// Files are loaded via IPC base64 read — no CSP or protocol restrictions.
-// Signal chain: BufferSource → EQ[10] → GainNode → MasterGain → Analyser → out
+// Web Audio API. Signal chain:
+//   source → gainNode(xfade-out) → EQ[10] → masterGain → analyser → dest
+// During crossfade a second source feeds directly into EQ[0] (summed):
+//   nextSource → nextGain(xfade-in) → EQ[0]  (Web Audio sums multiple inputs)
 
 const EQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 
@@ -9,8 +10,8 @@ export class AudioEngine {
   constructor() {
     this.audioContext    = null
     this.currentSource  = null
-    this.gainNode       = null        // crossfade gain
-    this.masterGainNode = null        // master volume
+    this.gainNode       = null   // per-source crossfade gain
+    this.masterGainNode = null   // master volume (0-1)
     this.analyserNode   = null
     this.eqNodes        = []
 
@@ -20,143 +21,148 @@ export class AudioEngine {
     this.isPlaying      = false
     this.duration       = 0
 
-    // Stored values applied even before the audio context is created
-    this.volume    = 0.75
-    this.eqEnabled = true
-    this.eqGains   = Object.fromEntries(EQ_BANDS.map(f => [f, 0]))
+    // Stored values – applied when context is first created
+    this.volume      = 0.75
+    this.eqEnabled   = true
+    this.eqGains     = Object.fromEntries(EQ_BANDS.map(f => [f, 0]))
+    this.crossfadeTime = 0  // seconds (0 = disabled)
 
-    this.onEnded        = null
-    this.onTimeUpdate   = null
-    this.onError        = null
-    this.onBufferLoaded = null
+    // Crossfade / preload state
+    this._preloadedBuffer   = null
+    this._preloadTriggered  = false   // has onNearEnd fired for this track?
+    this._crossfadeStarted  = false   // has onCrossfadeStart fired?
+
+    // Callbacks
+    this.onEnded          = null
+    this.onTimeUpdate     = null
+    this.onError          = null
+    this.onBufferLoaded   = null
+    this.onNearEnd        = null   // fires crossfadeTime+3s before end → preload
+    this.onCrossfadeStart = null   // fires crossfadeTime seconds before end
 
     this._timeUpdateInterval = null
   }
 
-  // ── Initialization ──────────────────────────────────────────────────────────
+  // ── Init ─────────────────────────────────────────────────────────────────────
   async init() {
     if (this.audioContext) {
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume()
-      }
+      if (this.audioContext.state === 'suspended') await this.audioContext.resume()
       return
     }
-
-    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-      latencyHint: 'playback',
-    })
-
+    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'playback' })
     this._buildSignalChain()
-    console.log('[AudioEngine] Initialized, sampleRate:', this.audioContext.sampleRate)
   }
 
   _buildSignalChain() {
     const ctx = this.audioContext
 
-    // 10-band EQ — initialise each node with the already-stored gain value
-    // so any EQ changes made before first play are respected immediately.
+    // 10-band EQ
     this.eqNodes = EQ_BANDS.map((freq, i) => {
       const f = ctx.createBiquadFilter()
       f.type = i === 0 ? 'lowshelf' : i === EQ_BANDS.length - 1 ? 'highshelf' : 'peaking'
       f.frequency.value = freq
       f.Q.value = 1.41
-      // Apply stored gain (0 by default, or whatever was set before play)
       f.gain.value = this.eqEnabled ? (this.eqGains[freq] || 0) : 0
       return f
     })
+    for (let i = 0; i < this.eqNodes.length - 1; i++) this.eqNodes[i].connect(this.eqNodes[i + 1])
 
-    // Chain EQ nodes in series
-    for (let i = 0; i < this.eqNodes.length - 1; i++) {
-      this.eqNodes[i].connect(this.eqNodes[i + 1])
-    }
-
-    // Crossfade gain node
+    // Per-source crossfade gain (sits BEFORE EQ so both crossfade paths share EQ)
+    // Layout: source → gainNode → EQ[0] → ... → EQ[9] → masterGain → analyser → dest
+    // During xfade: nextSource → nextGain → EQ[0]  (Web Audio sums)
     this.gainNode = ctx.createGain()
     this.gainNode.gain.value = 1.0
+    this.gainNode.connect(this.eqNodes[0])
 
-    // Master volume
     this.masterGainNode = ctx.createGain()
-    this.masterGainNode.gain.value = this.volume   // apply stored volume
+    this.masterGainNode.gain.value = this.volume
 
-    // Analyser
     this.analyserNode = ctx.createAnalyser()
     this.analyserNode.fftSize = 2048
     this.analyserNode.smoothingTimeConstant = 0.8
     this.analyserNode.minDecibels = -90
     this.analyserNode.maxDecibels = -10
 
-    // Final chain: EQ[last] → gain → masterGain → analyser → destination
-    this.eqNodes[this.eqNodes.length - 1].connect(this.gainNode)
-    this.gainNode.connect(this.masterGainNode)
+    this.eqNodes[this.eqNodes.length - 1].connect(this.masterGainNode)
     this.masterGainNode.connect(this.analyserNode)
     this.analyserNode.connect(ctx.destination)
   }
 
-  // ── File Loading ───────────────────────────────────────────────────────────
+  // ── File loading ──────────────────────────────────────────────────────────────
   async loadFile(filePath) {
     await this.init()
-
     try {
-      const arrayBuffer = await this._readFileAsArrayBuffer(filePath)
-      const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer)
-      this.currentBuffer = audioBuffer
-      this.duration = audioBuffer.duration
-      this.onBufferLoaded?.(audioBuffer.duration)
-      console.log('[AudioEngine] Loaded:', filePath, `(${audioBuffer.duration.toFixed(1)}s)`)
-      return audioBuffer
+      const ab = await this._readFileAsArrayBuffer(filePath)
+      const buf = await this.audioContext.decodeAudioData(ab)
+      this.currentBuffer = buf
+      this.duration = buf.duration
+      this.onBufferLoaded?.(buf.duration)
+      return buf
     } catch (err) {
-      console.error('[AudioEngine] Load failed:', filePath, err)
+      console.error('[AudioEngine] loadFile error:', filePath, err)
       this.onError?.(`Cannot load audio: ${err.message}`)
       throw err
     }
   }
 
-  async _readFileAsArrayBuffer(filePath) {
-    // ── Strategy 1: IPC base64 (primary) ─────────────────────────────────────
-    // Main process reads the file bytes; renderer decodes. No CSP / CORS / protocol issues.
-    if (window.electronAPI?.audio?.readFileBase64) {
-      const base64 = await window.electronAPI.audio.readFileBase64(filePath)
-      if (base64) return this._base64ToArrayBuffer(base64)
-      throw new Error(`File not readable via IPC: ${filePath}`)
+  // Pre-load a file into _preloadedBuffer (for crossfade)
+  async preloadFile(filePath) {
+    if (!filePath) return
+    try {
+      await this.init()
+      const ab = await this._readFileAsArrayBuffer(filePath)
+      this._preloadedBuffer = await this.audioContext.decodeAudioData(ab)
+    } catch (err) {
+      console.warn('[AudioEngine] preloadFile error:', filePath, err.message)
+      this._preloadedBuffer = null
     }
-
-    // ── Strategy 2: retronix:// protocol fetch (fallback) ─────────────────────
-    if (window.electronAPI) {
-      const url      = 'retronix:///' + encodeURIComponent(filePath)
-      const response = await fetch(url)
-      if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`)
-      return response.arrayBuffer()
-    }
-
-    // ── Strategy 3: plain fetch (web/dev mode) ────────────────────────────────
-    const response = await fetch(filePath)
-    if (!response.ok) throw new Error(`HTTP ${response.status} for ${filePath}`)
-    return response.arrayBuffer()
   }
 
-  _base64ToArrayBuffer(base64) {
-    const binary = atob(base64)
-    const buf    = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i)
+  async _readFileAsArrayBuffer(filePath) {
+    if (window.electronAPI?.audio?.readFileBase64) {
+      const b64 = await window.electronAPI.audio.readFileBase64(filePath)
+      if (b64) return this._b64ToAB(b64)
+      throw new Error('base64 returned null for: ' + filePath)
+    }
+    if (window.electronAPI) {
+      const r = await fetch('retronix:///' + encodeURIComponent(filePath))
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return r.arrayBuffer()
+    }
+    const r = await fetch(filePath)
+    if (!r.ok) throw new Error('HTTP ' + r.status)
+    return r.arrayBuffer()
+  }
+
+  _b64ToAB(b64) {
+    const bin = atob(b64)
+    const buf = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
     return buf.buffer
   }
 
-  // ── Playback ───────────────────────────────────────────────────────────────
+  // ── Playback ──────────────────────────────────────────────────────────────────
   play(offset = 0) {
-    if (!this.currentBuffer) {
-      console.warn('[AudioEngine] play() — no buffer loaded')
-      return
-    }
+    if (!this.currentBuffer) { console.warn('[AudioEngine] play() – no buffer'); return }
     if (this.audioContext.state === 'suspended') this.audioContext.resume()
 
-    this._stopCurrentSource()
+    this._stopCurrentSource(false)  // stop but don't reset preload flags
 
     const source = this.audioContext.createBufferSource()
     source.buffer = this.currentBuffer
-    source.connect(this.eqNodes[0])
+    source.connect(this.gainNode)
+
+    // Reset crossfade/preload flags for fresh play
+    this._preloadTriggered = false
+    this._crossfadeStarted = false
+    this._preloadedBuffer  = null
+
+    // Restore gainNode to full (it may have been ramped down by crossfade)
+    this.gainNode.gain.cancelScheduledValues(this.audioContext.currentTime)
+    this.gainNode.gain.setValueAtTime(1.0, this.audioContext.currentTime)
 
     source.onended = () => {
-      if (this.isPlaying) {
+      if (this.isPlaying && this.currentSource === source) {
         this.isPlaying   = false
         this.pauseOffset = 0
         this._stopTimeUpdate()
@@ -165,25 +171,24 @@ export class AudioEngine {
     }
 
     const safe = Math.max(0, Math.min(offset, this.duration - 0.001))
-    this.pauseOffset  = safe
-    this.startTime    = this.audioContext.currentTime - safe
+    this.pauseOffset = safe
+    this.startTime   = this.audioContext.currentTime - safe
     source.start(0, safe)
     this.currentSource = source
     this.isPlaying     = true
-
     this._startTimeUpdate()
   }
 
   pause() {
     if (!this.isPlaying) return
     this.pauseOffset = this.getCurrentTime()
-    this._stopCurrentSource()
+    this._stopCurrentSource(true)
     this.isPlaying = false
     this._stopTimeUpdate()
   }
 
   stop() {
-    this._stopCurrentSource()
+    this._stopCurrentSource(true)
     this.isPlaying   = false
     this.pauseOffset = 0
     this._stopTimeUpdate()
@@ -192,45 +197,94 @@ export class AudioEngine {
   seek(time) {
     const t = Math.max(0, Math.min(time, this.duration))
     const wasPlaying = this.isPlaying
-
-    this._stopCurrentSource()
+    this._stopCurrentSource(true)
     this.isPlaying   = false
     this._stopTimeUpdate()
     this.pauseOffset = t
-
-    if (wasPlaying) {
-      this.play(t)
-    } else {
-      this.onTimeUpdate?.(t, this.duration)
-    }
+    if (wasPlaying) this.play(t)
+    else this.onTimeUpdate?.(t, this.duration)
   }
 
-  // ── Volume & EQ ───────────────────────────────────────────────────────────
+  // ── Crossfade ─────────────────────────────────────────────────────────────────
+  // Called by PlayerStore when it's time to transition to the pre-loaded buffer.
+  // Creates a second source path that fades in while current fades out.
+  startCrossfade(buffer, fadeTime) {
+    if (!buffer || !this.audioContext || !this.isPlaying) return false
+    const ctx = this.audioContext
+    const now = ctx.currentTime
+    const ft  = Math.max(0.1, fadeTime || this.crossfadeTime || 3)
+
+    // New source + gain node
+    const nextSource = ctx.createBufferSource()
+    nextSource.buffer = buffer
+    const nextGain = ctx.createGain()
+    nextGain.gain.setValueAtTime(0, now)
+    nextGain.gain.linearRampToValueAtTime(1, now + ft)
+
+    // nextGain → EQ[0]  (Web Audio sums with existing gainNode → EQ[0])
+    nextSource.connect(nextGain)
+    nextGain.connect(this.eqNodes[0])
+    nextSource.start(0)
+
+    // Fade out current gainNode
+    this.gainNode.gain.cancelScheduledValues(now)
+    this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now)
+    this.gainNode.gain.linearRampToValueAtTime(0, now + ft)
+
+    const oldSource = this.currentSource
+    const oldGain   = this.gainNode
+
+    // Swap state immediately so time-tracking and onEnded reflect new track
+    this.currentSource   = nextSource
+    this.gainNode        = nextGain
+    this.currentBuffer   = buffer
+    this.duration        = buffer.duration
+    this.startTime       = ctx.currentTime
+    this.pauseOffset     = 0
+    this._crossfadeStarted  = false
+    this._preloadTriggered  = false
+    this._preloadedBuffer   = null
+
+    nextSource.onended = () => {
+      if (this.isPlaying && this.currentSource === nextSource) {
+        this.isPlaying   = false
+        this.pauseOffset = 0
+        this._stopTimeUpdate()
+        this.onEnded?.()
+      }
+    }
+
+    // Kill old source after fade completes
+    setTimeout(() => {
+      try { oldSource?.stop(); oldSource?.disconnect() } catch (_) {}
+      try { oldGain?.disconnect() } catch (_) {}
+    }, (ft + 0.3) * 1000)
+
+    this.onBufferLoaded?.(buffer.duration)
+    return true
+  }
+
+  setCrossfadeTime(seconds) {
+    this.crossfadeTime = Math.max(0, Math.min(10, seconds || 0))
+  }
+
+  // ── EQ ────────────────────────────────────────────────────────────────────────
   setVolume(volume) {
     this.volume = Math.max(0, Math.min(volume, 100)) / 100
     if (this.masterGainNode && this.audioContext) {
-      this.masterGainNode.gain.setTargetAtTime(
-        this.volume,
-        this.audioContext.currentTime,
-        0.015
-      )
+      this.masterGainNode.gain.setTargetAtTime(this.volume, this.audioContext.currentTime, 0.015)
     }
-    // If audio context not yet created, the value is stored in this.volume
-    // and will be applied in _buildSignalChain when a track is first played.
   }
 
   setEqBand(frequency, gainDb) {
     const freq = Number(frequency)
     this.eqGains[freq] = gainDb
     if (!this.eqEnabled) return
-
     const idx  = EQ_BANDS.indexOf(freq)
     const node = this.eqNodes[idx]
     if (node && this.audioContext) {
       node.gain.setTargetAtTime(gainDb, this.audioContext.currentTime, 0.015)
     }
-    // If nodes don't exist yet the value is stored in eqGains and
-    // will be applied by _buildSignalChain on first play.
   }
 
   setEqEnabled(enabled) {
@@ -239,13 +293,15 @@ export class AudioEngine {
     EQ_BANDS.forEach((freq, i) => {
       const node = this.eqNodes[i]
       if (!node) return
-      const gain = enabled ? (this.eqGains[freq] || 0) : 0
-      node.gain.setTargetAtTime(gain, this.audioContext.currentTime, 0.015)
+      node.gain.setTargetAtTime(
+        enabled ? (this.eqGains[freq] || 0) : 0,
+        this.audioContext.currentTime, 0.015
+      )
     })
   }
 
   applyEqPreset(preset) {
-    const presets = {
+    const PRESETS = {
       flat:         [0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
       bass_boost:   [8,  6,  4,  2,  0,  0,  0,  0,  0,  0],
       treble_boost: [0,  0,  0,  0,  0,  0,  2,  4,  6,  8],
@@ -257,27 +313,12 @@ export class AudioEngine {
       vocal:        [-2,-2,  0,  3,  5,  5,  3,  2, -1, -2],
       loudness:     [6,  4,  0,  0, -2,  0,  0,  0,  4,  6],
     }
-    const gains = presets[preset] || presets.flat
+    const gains = PRESETS[preset] || PRESETS.flat
     EQ_BANDS.forEach((freq, i) => this.setEqBand(freq, gains[i]))
     return Object.fromEntries(EQ_BANDS.map((f, i) => [f, gains[i]]))
   }
 
-  // ── Analyser data ─────────────────────────────────────────────────────────
-  getFrequencyData() {
-    if (!this.analyserNode) return new Uint8Array(1024)
-    const d = new Uint8Array(this.analyserNode.frequencyBinCount)
-    this.analyserNode.getByteFrequencyData(d)
-    return d
-  }
-
-  getTimeDomainData() {
-    if (!this.analyserNode) return new Uint8Array(2048)
-    const d = new Uint8Array(this.analyserNode.fftSize)
-    this.analyserNode.getByteTimeDomainData(d)
-    return d
-  }
-
-  // ── Time tracking ─────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────────
   getCurrentTime() {
     if (!this.isPlaying || !this.audioContext) return this.pauseOffset
     return Math.min(this.audioContext.currentTime - this.startTime, this.duration || 0)
@@ -286,8 +327,24 @@ export class AudioEngine {
   _startTimeUpdate() {
     this._stopTimeUpdate()
     this._timeUpdateInterval = setInterval(() => {
-      if (this.isPlaying) this.onTimeUpdate?.(this.getCurrentTime(), this.duration)
-    }, 200)
+      if (!this.isPlaying) return
+      const time = this.getCurrentTime()
+      this.onTimeUpdate?.(time, this.duration)
+
+      // Near-end: fire preload trigger crossfadeTime + 3s before end
+      if (this.crossfadeTime > 0 && !this._preloadTriggered
+          && this.duration > 0 && time >= this.duration - this.crossfadeTime - 3) {
+        this._preloadTriggered = true
+        this.onNearEnd?.()
+      }
+
+      // Crossfade: fire exactly crossfadeTime before end
+      if (this.crossfadeTime > 0 && !this._crossfadeStarted
+          && this.duration > 0 && time >= this.duration - this.crossfadeTime) {
+        this._crossfadeStarted = true
+        this.onCrossfadeStart?.()
+      }
+    }, 100)
   }
 
   _stopTimeUpdate() {
@@ -297,31 +354,27 @@ export class AudioEngine {
     }
   }
 
-  _stopCurrentSource() {
+  _stopCurrentSource(resetPreload = false) {
     if (this.currentSource) {
-      try {
-        this.currentSource.onended = null
-        this.currentSource.stop()
-        this.currentSource.disconnect()
-      } catch (_) { /* already stopped */ }
+      try { this.currentSource.onended = null; this.currentSource.stop(); this.currentSource.disconnect() } catch (_) {}
       this.currentSource = null
+    }
+    if (resetPreload) {
+      this._preloadTriggered = false
+      this._crossfadeStarted = false
     }
   }
 
   destroy() {
     this.stop()
     this._stopTimeUpdate()
-    if (this.audioContext) {
-      this.audioContext.close()
-      this.audioContext = null
-    }
+    if (this.audioContext) { this.audioContext.close(); this.audioContext = null }
   }
 
-  get fftSize()           { return this.analyserNode?.fftSize          || 2048 }
+  get fftSize()           { return this.analyserNode?.fftSize || 2048 }
   get frequencyBinCount() { return this.analyserNode?.frequencyBinCount || 1024 }
 }
 
-// Singleton — one engine per renderer process
 let _instance = null
 export function getAudioEngine() {
   if (!_instance) _instance = new AudioEngine()
