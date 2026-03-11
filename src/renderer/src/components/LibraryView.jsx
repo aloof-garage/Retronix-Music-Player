@@ -34,8 +34,8 @@ function ContextMenu({ x, y, track, playlists, onClose, onPlay, onAddToQueue, on
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
         width: '100%', background: 'none', border: 'none',
-        padding: '8px 14px', cursor: 'pointer', textAlign: 'left',
-        fontSize: 11, letterSpacing: '0.06em',
+        padding: '9px 14px', cursor: 'pointer', textAlign: 'left',
+        fontSize: 12, letterSpacing: '0.06em',
         color: danger ? '#ff6b6b' : T.text,
         fontFamily: 'inherit',
       }}
@@ -77,37 +77,37 @@ const TrackRow = memo(function TrackRow({ track, index, isActive, isPlaying, onP
 
   return (
     <div
-      onDoubleClick={() => onPlay(track)}
+      onClick={() => onPlay(track)}
       onContextMenu={e => { e.preventDefault(); onContextMenu(e, track) }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
         display: 'grid',
         gridTemplateColumns: '30px 1fr 1fr 80px 60px 50px 50px',
-        padding: '10px 14px', cursor: 'pointer', alignItems: 'center',
+        padding: '11px 14px', cursor: 'pointer', alignItems: 'center',
         borderBottom: `1px solid ${T.border}`,
         background: isActive ? T.activeRow : hover ? T.hoverRow : 'transparent',
         transition: 'background 0.1s',
       }}
     >
-      <span style={{ fontSize: 10, color: isActive ? T.accent : T.textMuted }}>
+      <span style={{ fontSize: 11, color: isActive ? T.accent : T.textMuted }}>
         {isActive && isPlaying ? '▶' : index + 1}
       </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         <AlbumArt color={track.color} size={32} trackId={track.id} artworkPath={track.artwork_path}/>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 11, fontWeight: isActive ? 700 : 400, color: isActive ? T.accent : T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ fontSize: 12, fontWeight: isActive ? 700 : 400, color: isActive ? T.accent : T.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {track.title}
           </div>
-          <div style={{ fontSize: 10, color: T.textMuted }}>{track.artist}</div>
+          <div style={{ fontSize: 11, color: T.textMuted }}>{track.artist}</div>
         </div>
       </div>
-      <span style={{ fontSize: 10, color: T.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{track.album}</span>
-      <span style={{ fontSize: 9, color: T.textMuted, letterSpacing: '0.08em' }}>{track.genre}</span>
-      <span style={{ fontSize: 10, color: T.textMuted }}>{track.plays || 0}</span>
-      <span style={{ fontSize: 10, color: T.textMuted }}>{formatTime(track.duration)}</span>
+      <span style={{ fontSize: 11, color: T.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{track.album}</span>
+      <span style={{ fontSize: 10, color: T.textMuted, letterSpacing: '0.06em' }}>{track.genre}</span>
+      <span style={{ fontSize: 11, color: T.textMuted }}>{track.plays || 0}</span>
+      <span style={{ fontSize: 11, color: T.textMuted }}>{formatTime(track.duration)}</span>
       <button onClick={e => { e.stopPropagation(); onToggleFav(track.id) }}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: track.favorite ? T.accent : T.textMuted, padding: 0 }}>
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: track.favorite ? T.accent : T.textMuted, padding: 0 }}>
         {track.favorite ? '♥' : '♡'}
       </button>
     </div>

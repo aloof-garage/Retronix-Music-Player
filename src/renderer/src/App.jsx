@@ -94,7 +94,7 @@ function AppInner() {
       case 'eq':
         return <EqualizerPanel theme={T} eqValues={eqValues} onEqChange={handleEqChange} enabled={eqEnabled} onToggle={handleEqToggle}/>
       case 'visualizer':
-        return <VisualizerPanel theme={T}/>
+        return <VisualizerPanel theme={T} vizType={visualizerType} onVizTypeChange={setVisualizerType}/>
       case 'settings':
         return <SettingsPanel theme={T} darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} visualizerType={visualizerType} onVisualizerChange={setVisualizerType}/>
       default:

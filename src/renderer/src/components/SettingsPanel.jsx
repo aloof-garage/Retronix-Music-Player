@@ -59,12 +59,12 @@ export function SettingsPanel({ theme: T, darkMode, onToggleDark, visualizerType
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
       <div style={{ maxWidth: 600 }}>
-        <h2 style={{ margin: '0 0 24px', fontSize: 18, letterSpacing: '0.15em', color: T.text }}>SETTINGS</h2>
+        <h2 style={{ margin: '0 0 24px', fontSize: 20, letterSpacing: '0.15em', color: T.text }}>SETTINGS</h2>
 
         {/* Library */}
         <SettingsSection title="MUSIC LIBRARY" theme={T}>
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: '0.1em', marginBottom: 8 }}>LIBRARY PATHS</div>
+            <div style={{ fontSize: 11, color: T.textMuted, letterSpacing: '0.1em', marginBottom: 8 }}>LIBRARY PATHS</div>
             {state.libraryPaths.length === 0 ? (
               <div style={{ fontSize: 11, color: T.textMuted, padding: '8px 0' }}>No folders added yet</div>
             ) : (
@@ -165,7 +165,7 @@ export function SettingsPanel({ theme: T, darkMode, onToggleDark, visualizerType
 function SettingsSection({ title, children, theme: T }) {
   return (
     <div style={{ marginBottom: 24, borderRadius: 12, padding: 20, background: T.surfaceDeep, boxShadow: T.neumorphIn, border: `1px solid ${T.border}` }}>
-      <div style={{ fontSize: 9, letterSpacing: '0.2em', color: T.textMuted, marginBottom: 16, paddingBottom: 10, borderBottom: `1px solid ${T.border}` }}>
+      <div style={{ fontSize: 10, letterSpacing: '0.18em', color: T.textMuted, marginBottom: 16, paddingBottom: 10, borderBottom: `1px solid ${T.border}` }}>
         {title}
       </div>
       {children}
@@ -176,7 +176,7 @@ function SettingsSection({ title, children, theme: T }) {
 function SettingsRow({ label, children, theme: T }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${T.border}22` }}>
-      <span style={{ fontSize: 11, color: T.text, letterSpacing: '0.06em' }}>{label}</span>
+      <span style={{ fontSize: 12, color: T.text, letterSpacing: '0.06em' }}>{label}</span>
       {children}
     </div>
   )

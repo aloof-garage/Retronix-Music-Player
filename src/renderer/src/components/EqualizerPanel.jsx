@@ -151,7 +151,7 @@ export function EqualizerPanel({ theme: T, eqValues, onEqChange, enabled, onTogg
 
       {/* Built-in presets */}
       <div style={{ borderRadius: 12, padding: 16, background: T.surfaceDeep, boxShadow: T.neumorphIn, border: `1px solid ${T.border}`, marginBottom: 16 }}>
-        <div style={{ fontSize: 9, letterSpacing: '0.15em', color: T.textMuted, marginBottom: 12 }}>BUILT-IN PRESETS</div>
+        <div style={{ fontSize: 10, letterSpacing: '0.15em', color: T.textMuted, marginBottom: 12 }}>BUILT-IN PRESETS</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {BUILTIN_PRESETS.map(preset => (
             <HWButton key={preset.id} size="sm" theme={T}
@@ -166,7 +166,7 @@ export function EqualizerPanel({ theme: T, eqValues, onEqChange, enabled, onTogg
       {/* Custom presets */}
       {customPresets.length > 0 && (
         <div style={{ borderRadius: 12, padding: 16, background: T.surfaceDeep, boxShadow: T.neumorphIn, border: `1px solid ${T.accent}22`, marginBottom: 16 }}>
-          <div style={{ fontSize: 9, letterSpacing: '0.15em', color: T.textMuted, marginBottom: 12 }}>SAVED PRESETS</div>
+          <div style={{ fontSize: 10, letterSpacing: '0.15em', color: T.textMuted, marginBottom: 12 }}>SAVED PRESETS</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {customPresets.map(preset => (
               <div key={preset.id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -191,7 +191,7 @@ export function EqualizerPanel({ theme: T, eqValues, onEqChange, enabled, onTogg
 
       {/* EQ curve */}
       <div style={{ borderRadius: 12, padding: 16, background: T.surfaceDeep, boxShadow: T.neumorphIn, border: `1px solid ${T.border}` }}>
-        <div style={{ fontSize: 9, letterSpacing: '0.15em', color: T.textMuted, marginBottom: 8 }}>EQ CURVE</div>
+        <div style={{ fontSize: 10, letterSpacing: '0.15em', color: T.textMuted, marginBottom: 8 }}>EQ CURVE</div>
         <EQCurve eqValues={eqValues} theme={T} enabled={enabled}/>
       </div>
     </div>
@@ -242,7 +242,7 @@ function EQSlider({ label, value, onChange, theme: T, enabled }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, width: 32 }}>
-      <div style={{ fontSize: 9, color: T.accent, fontFamily: "'Courier New', monospace", minWidth: 30, textAlign: 'center', opacity: enabled ? 1 : 0.4 }}>
+      <div style={{ fontSize: 10, color: T.accent, fontFamily: "'Courier New', monospace", minWidth: 30, textAlign: 'center', opacity: enabled ? 1 : 0.4 }}>
         {display > 0 ? '+' : ''}{display.toFixed(1)}
       </div>
       <div ref={trackRef} onClick={onTrackClick}
@@ -271,7 +271,7 @@ function EQSlider({ label, value, onChange, theme: T, enabled }) {
           }}
         />
       </div>
-      <div style={{ fontSize: 8, color: T.textMuted, letterSpacing: '0.06em' }}>{label}</div>
+      <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: '0.06em' }}>{label}</div>
     </div>
   )
 }

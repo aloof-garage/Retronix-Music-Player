@@ -44,7 +44,7 @@ export function Sidebar({ activeSection, onNavigate, theme: T }) {
             background: activeSection === item.id ? T.surfaceDeep : 'transparent',
             color: activeSection === item.id ? T.accent : T.textMuted,
             boxShadow: activeSection === item.id ? T.neumorphIn : 'none',
-            fontSize: 11, letterSpacing: '0.1em', textAlign: 'left',
+            fontSize: 12, letterSpacing: '0.1em', textAlign: 'left',
             fontFamily: 'inherit', transition: 'all 0.15s',
           }}
         >
@@ -67,7 +67,7 @@ export function Sidebar({ activeSection, onNavigate, theme: T }) {
           ['ARTISTS', artistCount],
           ['RUNTIME', formatTime(totalDuration)],
         ].map(([k, v]) => (
-          <div key={k} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5, fontSize: 10 }}>
+          <div key={k} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5, fontSize: 11 }}>
             <span style={{ color: T.textMuted }}>{k}</span>
             <span style={{ color: T.text }}>{v}</span>
           </div>
@@ -80,7 +80,7 @@ export function Sidebar({ activeSection, onNavigate, theme: T }) {
           padding: '8px', borderRadius: 6, background: T.surfaceDeep,
           border: `1px solid ${T.accent}44`, marginTop: 8,
         }}>
-          <div style={{ fontSize: 9, color: T.accent, letterSpacing: '0.1em', marginBottom: 4 }}>
+          <div style={{ fontSize: 10, color: T.accent, letterSpacing: '0.1em', marginBottom: 4 }}>
             SCANNING...
           </div>
           {state.scanProgress && (

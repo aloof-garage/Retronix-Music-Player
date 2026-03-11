@@ -14,13 +14,8 @@ export function AlbumArt({ color = '#e8834a', size = 56, trackId = 1, artworkPat
 
   if (dataUrl) {
     return (
-      <img
-        src={dataUrl}
-        width={size}
-        height={size}
-        style={{ borderRadius: 4, display: 'block', objectFit: 'cover' }}
-        alt="Album artwork"
-      />
+      <img src={dataUrl} width={size} height={size}
+        style={{ borderRadius: 4, display: 'block', objectFit: 'cover' }} alt="Album artwork"/>
     )
   }
 
@@ -65,11 +60,13 @@ export function AlbumArt({ color = '#e8834a', size = 56, trackId = 1, artworkPat
 }
 
 // ── Analog Knob ───────────────────────────────────────────────────────────────
+// value: 0–100 (linear percentage). angle range: -135° (min) → 0° (center/50) → +135° (max)
 export function AnalogKnob({ value = 75, onChange, size = 72, label, theme: T }) {
-  const [dragging, setDragging] = useState(false)
+  const [dragging, setDragging]   = useState(false)
   const startRef = useRef({ y: 0, v: 0 })
   const isDark = T?.bg?.startsWith('#1') || T?.bg?.startsWith('#0')
 
+  // Map 0–100 → -135° to +135° (270° sweep)
   const angle = -135 + (value / 100) * 270
 
   const onMouseDown = (e) => {
@@ -83,24 +80,19 @@ export function AnalogKnob({ value = 75, onChange, size = 72, label, theme: T })
     if (!dragging) return
     const onMove = (e) => {
       const dy = startRef.current.y - e.clientY
-      const newVal = Math.max(0, Math.min(100, startRef.current.v + dy * 0.8))
+      const newVal = Math.max(0, Math.min(100, startRef.current.v + dy * 0.75))
       onChange?.(newVal)
     }
-    const onUp = () => {
-      setDragging(false)
-      document.body.style.cursor = ''
-    }
+    const onUp = () => { setDragging(false); document.body.style.cursor = '' }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
-    return () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
   }, [dragging, onChange])
 
   const highlight = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.85)'
-  const shadow = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.25)'
+  const shadow    = isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.25)'
   const indicatorColor = T?.knobIndicator || '#e8834a'
+  const capSize = size * 0.56
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, userSelect: 'none' }}>
@@ -118,54 +110,70 @@ export function AnalogKnob({ value = 75, onChange, size = 72, label, theme: T })
           transition: dragging ? 'none' : 'box-shadow 0.2s',
         }}
       >
-        {/* Tick marks */}
+        {/* Tick marks ring */}
         <svg width={size} height={size}
           style={{ position: 'absolute', top: 0, left: 0, borderRadius: '50%', pointerEvents: 'none' }}>
           {Array.from({ length: 11 }).map((_, i) => {
             const a = (-135 + i * 27) * (Math.PI / 180)
             const r = size / 2 - 5
-            const x1 = size/2 + r * Math.cos(a)
-            const y1 = size/2 + r * Math.sin(a)
-            const x2 = size/2 + (r - 4) * Math.cos(a)
-            const y2 = size/2 + (r - 4) * Math.sin(a)
+            const x1 = size/2 + r * Math.cos(a),        y1 = size/2 + r * Math.sin(a)
+            const x2 = size/2 + (r - 4) * Math.cos(a),  y2 = size/2 + (r - 4) * Math.sin(a)
             return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2}
               stroke={isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)'} strokeWidth="1"/>
           })}
         </svg>
-        {/* Highlight */}
+
+        {/* Glare */}
         <div style={{
           position: 'absolute', top: '8%', left: '8%', width: '35%', height: '35%',
           borderRadius: '50%',
           background: `radial-gradient(circle, ${highlight} 0%, transparent 70%)`,
-          pointerEvents: 'none'
+          pointerEvents: 'none',
         }}/>
-        {/* Center cap */}
+
+        {/* Center cap – the rotating part */}
         <div style={{
-          position: 'absolute', top: '50%', left: '50%',
-          transform: 'translate(-50%,-50%)',
-          width: size * 0.55, height: size * 0.55, borderRadius: '50%',
+          position: 'absolute',
+          top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: capSize, height: capSize, borderRadius: '50%',
           background: isDark
             ? 'radial-gradient(circle at 40% 35%, #2a2f4a, #12141f)'
             : 'radial-gradient(circle at 40% 35%, #e8edf4, #c8d0de)',
           boxShadow: isDark
             ? 'inset 2px 2px 6px rgba(0,0,0,0.7), inset -1px -1px 3px rgba(255,255,255,0.06)'
             : 'inset 2px 2px 5px rgba(0,0,0,0.15), inset -2px -2px 5px rgba(255,255,255,0.8)',
+          overflow: 'hidden',
         }}>
+          {/*
+           * Indicator needle.
+           * bottom:'50%'  →  bottom edge of needle is at the center of the cap (= rotation pivot)
+           * transformOrigin:'50% 100%'  →  rotate around bottom edge (= cap center)
+           * translateX(-50%)  →  center the 2px needle horizontally
+           * rotate(angle)  →  at value=50 → 0° = straight up (12-o'clock)
+           */}
           <div style={{
-            position: 'absolute', top: '50%', left: '50%', width: '2px', height: '42%',
-            background: indicatorColor, borderRadius: '2px',
-            transform: `translate(-50%, -95%) rotate(${angle}deg)`,
+            position: 'absolute',
+            width: '12%',
+            height: '46%',
+            bottom: '50%',
+            left: '50%',
+            background: indicatorColor,
+            borderRadius: '2px 2px 0 0',
             transformOrigin: '50% 100%',
-            transition: dragging ? 'none' : 'transform 0.05s',
-            boxShadow: `0 0 6px ${indicatorColor}aa`,
+            transform: `translateX(-50%) rotate(${angle}deg)`,
+            transition: dragging ? 'none' : 'transform 0.04s',
+            boxShadow: `0 0 6px ${indicatorColor}bb`,
+            pointerEvents: 'none',
           }}/>
         </div>
       </div>
+
       {label && (
         <span style={{
-          fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase',
+          fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase',
           color: T?.textMuted || '#888',
-          fontFamily: "'Courier New', monospace"
+          fontFamily: "'Courier New', monospace",
         }}>
           {label}
         </span>
@@ -177,11 +185,8 @@ export function AnalogKnob({ value = 75, onChange, size = 72, label, theme: T })
 // ── Hardware Button ───────────────────────────────────────────────────────────
 export function HWButton({ children, active, onClick, size = 'md', theme: T, style = {} }) {
   const [pressed, setPressed] = useState(false)
-  const pad = size === 'lg' ? '14px 24px' : size === 'sm' ? '5px 10px' : '8px 16px'
-  const isDark = T?.bg?.startsWith('#1') || T?.bg?.startsWith('#0')
-  const bg = active
-    ? (T?.accent || '#e8834a')
-    : (T?.surfaceRaised || '#1e2235')
+  const pad = size === 'lg' ? '14px 24px' : size === 'sm' ? '5px 11px' : '8px 16px'
+  const bg       = active ? (T?.accent || '#e8834a') : (T?.surfaceRaised || '#1e2235')
   const textColor = active ? '#fff' : (T?.textMuted || '#9aa')
 
   return (
@@ -193,12 +198,11 @@ export function HWButton({ children, active, onClick, size = 'md', theme: T, sty
       style={{
         padding: pad, border: 'none', borderRadius: 8, cursor: 'pointer',
         fontFamily: "'Courier New', monospace",
-        fontSize: size === 'sm' ? 9 : 11,
+        fontSize: size === 'sm' ? 10 : 12,
         letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700,
         color: textColor, background: bg,
-        boxShadow: pressed
-          ? (T?.neumorphIn || 'inset 2px 2px 5px rgba(0,0,0,0.7)')
-          : (T?.neumorphOut || '3px 3px 8px rgba(0,0,0,0.6)'),
+        boxShadow: pressed ? (T?.neumorphIn || 'inset 2px 2px 5px rgba(0,0,0,0.7)')
+                           : (T?.neumorphOut || '3px 3px 8px rgba(0,0,0,0.6)'),
         transform: pressed ? 'translateY(1px)' : 'translateY(0)',
         transition: 'box-shadow 0.1s, transform 0.1s',
         userSelect: 'none', outline: 'none',
@@ -213,8 +217,8 @@ export function HWButton({ children, active, onClick, size = 'md', theme: T, sty
 // ── Transport Button ──────────────────────────────────────────────────────────
 export function TransportBtn({ children, onClick, isPrimary, theme: T }) {
   const [pressed, setPressed] = useState(false)
-  const size = isPrimary ? 64 : 44
   const isDark = T?.bg?.startsWith('#1') || T?.bg?.startsWith('#0')
+  const size = isPrimary ? 56 : 44
 
   return (
     <button
@@ -223,15 +227,12 @@ export function TransportBtn({ children, onClick, isPrimary, theme: T }) {
       onMouseLeave={() => setPressed(false)}
       onClick={onClick}
       style={{
-        width: size, height: size, borderRadius: '50%', border: 'none',
-        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0,
+        width: size, height: size, borderRadius: '50%', border: 'none', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: isPrimary
-          ? (isDark
-            ? 'radial-gradient(circle at 35% 30%, #e8834a, #9c4220)'
-            : 'radial-gradient(circle at 35% 30%, #f0a070, #c0632a)')
+          ? `radial-gradient(circle at 35% 30%, ${T?.accent || '#e8834a'}, ${T?.accentDim || '#7a3a18'})`
           : (isDark
-            ? 'radial-gradient(circle at 35% 30%, #2d3250, #12141f)'
+            ? 'radial-gradient(circle at 35% 30%, #2a2f4a, #12141f)'
             : 'radial-gradient(circle at 35% 30%, #e8edf4, #c8d0de)'),
         boxShadow: pressed
           ? (isDark
@@ -253,31 +254,22 @@ export function TransportBtn({ children, onClick, isPrimary, theme: T }) {
   )
 }
 
-// ── Progress Slider ───────────────────────────────────────────────────────────
+// ── Progress / Seek Slider ────────────────────────────────────────────────────
 export function ProgressSlider({ value, max, onChange, theme: T }) {
-  const pct = max ? (value / max) * 100 : 0
+  const pct    = max ? (value / max) * 100 : 0
   const accent = T?.accent || '#e8834a'
   const trackBg = `linear-gradient(90deg, ${accent} 0%, ${accent} ${pct}%, ${T?.inputBg || '#0e1020'} ${pct}%, ${T?.inputBg || '#0e1020'} 100%)`
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
-      <div style={{
-        width: '100%', height: 6, borderRadius: 3,
-        background: T?.inputBg || '#0a0c18',
-        boxShadow: T?.neumorphIn || 'inset 2px 2px 4px rgba(0,0,0,0.8)',
-        position: 'relative',
-      }}>
+      <div style={{ width: '100%', height: 6, borderRadius: 3, background: T?.inputBg || '#0a0c18', boxShadow: T?.neumorphIn, position: 'relative' }}>
         <div style={{ position: 'absolute', inset: 0, borderRadius: 3, background: trackBg }}/>
       </div>
       <input
         type="range" min="0" max={max || 1} step="0.1"
         value={value}
         onChange={e => onChange?.(Number(e.target.value))}
-        style={{
-          position: 'absolute', top: '50%', left: 0, width: '100%',
-          transform: 'translateY(-50%)', opacity: 0, cursor: 'pointer',
-          height: 20, margin: 0, padding: 0,
-        }}
+        style={{ position: 'absolute', top: '50%', left: 0, width: '100%', transform: 'translateY(-50%)', opacity: 0, cursor: 'pointer', height: 20, margin: 0, padding: 0 }}
       />
     </div>
   )
@@ -291,7 +283,7 @@ export function VUMeter({ level = 0.7, theme: T }) {
       {Array.from({ length: bars }).map((_, i) => {
         const threshold = i / bars
         const active = threshold < level
-        const isRed = i >= bars * 0.85
+        const isRed    = i >= bars * 0.85
         const isYellow = i >= bars * 0.7
         const color = active
           ? (isRed ? (T?.vuClip || '#f44') : isYellow ? (T?.vuWarn || '#fa0') : (T?.vuActive || '#4c8'))
@@ -329,12 +321,10 @@ export function LCDDisplay({ children, theme: T, style = {} }) {
       background: T?.lcdBg || '#06070f',
       color: T?.lcdText || '#00ff88',
       fontFamily: "'Courier New', monospace",
-      padding: '4px 8px',
-      borderRadius: 4,
+      padding: '4px 8px', borderRadius: 4,
       boxShadow: T?.neumorphIn || 'inset 2px 2px 6px rgba(0,0,0,0.8)',
       border: '1px solid rgba(0,255,0,0.1)',
-      fontSize: 11,
-      letterSpacing: '0.1em',
+      fontSize: 12, letterSpacing: '0.1em',
       ...style
     }}>
       {children}
@@ -344,32 +334,24 @@ export function LCDDisplay({ children, theme: T, style = {} }) {
 
 // ── Toggle Switch ─────────────────────────────────────────────────────────────
 export function ToggleSwitch({ active, onChange, theme: T, label }) {
-  const isDark = T?.bg?.startsWith('#1') || T?.bg?.startsWith('#0')
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-      <div
-        onClick={() => onChange?.(!active)}
+      <div onClick={() => onChange?.(!active)}
         style={{
-          width: 36, height: 18, borderRadius: 9, cursor: 'pointer',
-          position: 'relative',
+          width: 36, height: 18, borderRadius: 9, cursor: 'pointer', position: 'relative',
           background: active ? (T?.accent || '#e8834a') : (T?.surfaceDeep || '#0e1020'),
           boxShadow: T?.neumorphIn || 'inset 2px 2px 4px rgba(0,0,0,0.6)',
           transition: 'background 0.2s',
-        }}
-      >
+        }}>
         <div style={{
           position: 'absolute', top: 2, left: active ? 18 : 2,
           width: 14, height: 14, borderRadius: '50%',
           background: active ? '#fff' : (T?.textMuted || '#6a7488'),
-          boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-          transition: 'left 0.2s',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.4)', transition: 'left 0.2s',
         }}/>
       </div>
       {label && (
-        <span style={{
-          fontSize: 9, letterSpacing: '0.1em', color: T?.textMuted || '#6a7488',
-          textTransform: 'uppercase',
-        }}>
+        <span style={{ fontSize: 10, letterSpacing: '0.1em', color: T?.textMuted || '#6a7488', textTransform: 'uppercase' }}>
           {label}
         </span>
       )}
@@ -377,11 +359,11 @@ export function ToggleSwitch({ active, onChange, theme: T, label }) {
   )
 }
 
-// ── Spectrum Visualizer (compact, bottom bar) ─────────────────────────────────
+// ── Spectrum Visualizer (compact bottom bar) ──────────────────────────────────
 export function SpectrumVisualizer({ isPlaying, theme: T, analyser }) {
   const canvasRef = useRef(null)
-  const animRef = useRef(null)
-  const barsRef = useRef(Array.from({ length: 32 }, () => Math.random() * 0.3))
+  const animRef   = useRef(null)
+  const barsRef   = useRef(Array.from({ length: 32 }, () => 0))
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -398,14 +380,11 @@ export function SpectrumVisualizer({ isPlaying, theme: T, analyser }) {
         analyser.getByteFrequencyData(data)
         barsRef.current = barsRef.current.map((_, i) => {
           const idx = Math.floor((i / barsRef.current.length) * data.length * 0.7)
-          return data[idx] / 255
+          const target = data[idx] / 255
+          return barsRef.current[i] + (target - barsRef.current[i]) * 0.3
         })
       } else {
-        barsRef.current = barsRef.current.map((v) => {
-          if (!isPlaying) return v * 0.95
-          const target = Math.random() * 0.9 + Math.sin(Date.now() * 0.003) * 0.2
-          return v + (target - v) * 0.15
-        })
+        barsRef.current = barsRef.current.map(v => v * 0.92)
       }
 
       barsRef.current.forEach((v, i) => {
